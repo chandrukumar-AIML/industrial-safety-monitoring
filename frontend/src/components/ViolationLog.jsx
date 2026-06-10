@@ -3,7 +3,7 @@ import { useState, memo, useCallback } from 'react'
 import { format, isValid }             from 'date-fns'
 import PropTypes                       from 'prop-types'
 import { CheckCircle, Eye, AlertTriangle, ClipboardList } from 'lucide-react'
-import { useViolations, useAcknowledge }  from '../hooks/useviolations'
+import { useViolations, useAcknowledge }  from '../hooks/useViolations'
 import { SHAPModal }                      from './SHAPModal'
 import { LOG_FILTERS }                    from '../constants'
 
