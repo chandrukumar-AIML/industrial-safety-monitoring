@@ -357,10 +357,14 @@ def create_app() -> FastAPI:
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
 
-    # CORS middleware (must be added before auth middleware)
+    # CORS middleware (must be added before auth middleware).
+    # In addition to the explicit CORS_ORIGINS env list, allow any Vercel or
+    # Render preview/prod subdomain via regex so a frontend deploy works
+    # out-of-the-box without manually wiring CORS_ORIGINS.
     app.add_middleware(
         CORSMiddleware,
         allow_origins=CORS_ORIGINS,
+        allow_origin_regex=r"https://.*\.(vercel\.app|onrender\.com)",
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type", "X-API-Key", "X-Org-ID"],
