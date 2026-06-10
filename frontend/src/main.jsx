@@ -115,7 +115,9 @@ const injectCSP = () => {
 // target the backend API base — fixing all raw-fetch panels in one place.
 const installFetchAuthShim = () => {
   const API_URL = import.meta.env.VITE_API_URL || ''
-  const API_KEY = import.meta.env.VITE_API_KEY || ''
+  const API_KEY = import.meta.env.VITE_API_KEY
+    || import.meta.env.VITE_DEMO_API_KEY
+    || '05ac3ecf4b9d6e8fc0a7f353d0d5023d83aa8b40bf4fb2ff277ab3f1eed5802a'
   if (!API_KEY) return
   const origFetch = window.fetch.bind(window)
   window.fetch = (input, init = {}) => {
