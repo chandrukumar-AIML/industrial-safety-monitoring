@@ -25,7 +25,9 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from loguru import logger
 
-from ..rag.chatbot import get_chatbot, ChatResponse
+# NOTE: rag.chatbot pulls in langchain/chromadb. Imported lazily inside the
+# handler so the API can boot on a slim deploy (no heavy ML stack) — /chat then
+# degrades gracefully if those packages aren't installed.
 
 router = APIRouter(prefix="/chat", tags=["chatbot"])
 
@@ -97,11 +99,20 @@ async def chat(
     client_ip = request.client.host if request.client else "unknown"
     _check_rate_limit(client_ip)
 
+    # Lazy import — keeps langchain/chromadb out of the startup path.
+    try:
+        from ..rag.chatbot import get_chatbot
+    except ImportError:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Chatbot is not available in this deployment (RAG dependencies not installed).",
+        )
+
     chatbot = get_chatbot()
     t0 = time.monotonic()
 
     try:
-        response: ChatResponse = await asyncio.wait_for(
+        response = await asyncio.wait_for(
             chatbot.ask(body.question),
             timeout=30.0  # Prevent hanging on slow LLM
         )
