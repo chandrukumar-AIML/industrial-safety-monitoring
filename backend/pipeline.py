@@ -113,8 +113,20 @@ class PipelineRuntime:
             self._ready.clear()
 
     async def _run(self) -> None:
-        from .inference.pipeline import InferencePipeline
-        from .inference.explainer import SHAPExplainer
+        # The inference stack (ultralytics/torch/cv2) is optional. On a slim
+        # cloud/demo deploy it isn't installed — detect that cleanly and skip
+        # live inference instead of crashing the thread with a stack trace.
+        try:
+            from .inference.pipeline import InferencePipeline
+            from .inference.explainer import SHAPExplainer
+        except ImportError as exc:
+            logger.info(
+                "Live inference disabled — ML stack not installed ({}). "
+                "Running in API/demo mode (synthetic data). This is expected on "
+                "slim cloud deploys.", str(exc),
+            )
+            self._ready.set()  # unblock anything waiting on pipeline readiness
+            return
 
         pipeline: Optional[InferencePipeline] = None
         event_writer_task: Optional[asyncio.Task] = None
