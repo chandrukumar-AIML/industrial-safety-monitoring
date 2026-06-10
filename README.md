@@ -1,454 +1,387 @@
-# 🏭 Industrial Safety & Asset Monitoring System
+# 🏭 SafeGuardAI — Industrial Safety Monitor
 
-[![Python](https://img.shields.io/badge/Python-3.8%2B-blue)](https://www.python.org/)
-[![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-red)](https://pytorch.org/)
+## What is this?
+
+**Every year, thousands of factory and construction workers are injured because no one
+noticed a missing helmet, an open flame near chemicals, or a worker in a danger zone —
+until it was too late.** One safety officer cannot watch 20 camera feeds at once.
+
+**SafeGuardAI turns any existing CCTV camera into a tireless AI safety inspector.** It
+watches every feed in real time, flags PPE violations and hazards the instant they
+happen, escalates to the right person, and auto-generates the OSHA-grade incident
+paperwork — so the safety team acts in seconds instead of reviewing footage after an
+accident.
+
+**Who it's for:** plant safety managers, EHS officers, and site supervisors in
+construction, steel, oil & gas, pharma, warehousing, power, shipbuilding, and mining.
+
+**One-line value:** *Stop accidents before they happen — by catching unsafe behavior the
+moment it appears, on the cameras you already own.*
+
+---
+
+[![Python](https://img.shields.io/badge/Python-3.11-blue?logo=python&logoColor=white)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.111-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![YOLOv8](https://img.shields.io/badge/YOLOv8-ultralytics-orange)](https://github.com/ultralytics/ultralytics)
+[![LangGraph](https://img.shields.io/badge/LangGraph-0.2.35-blueviolet)](https://github.com/langchain-ai/langgraph)
+[![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://react.dev/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![YOLOv8](https://img.shields.io/badge/YOLOv8-Ultralytics-yellow)](https://github.com/ultralytics/ultralytics)
-
-Real-time PPE detection, multi-object tracking, and OCR-based asset identification system deployed on NVIDIA Jetson Xavier NX for industrial safety compliance monitoring.
-
-![Demo](assets/demo.gif)
+[![CI](https://github.com/chandrukumar/industrial-safety-monitoring/actions/workflows/ci.yml/badge.svg)](https://github.com/chandrukumar/industrial-safety-monitoring/actions/workflows/ci.yml)
 
 ---
 
-## 🎯 Overview
+## 📸 Demo
 
-This system automates safety compliance monitoring in manufacturing environments by:
-- **Detecting PPE usage** (helmets, vests, goggles, boots) in real-time
-- **Tracking workers** across multiple camera views with persistent IDs
-- **Identifying assets** via OCR on serial numbers and labels
-- **Generating alerts** for safety violations with comprehensive logging
-
-### Key Results
-- ✅ **95.2% mAP@0.5** for PPE detection
-- ✅ **35 FPS** sustained throughput on Jetson Xavier NX (4 camera feeds)
-- ✅ **60% reduction** in safety violations during 3-month pilot
-- ✅ **92% OCR accuracy** on asset labels under varied conditions
+> **[Add GIF/screenshot here — record with OBS or Loom]**
+> Suggested: 30-second screen recording of Landing → Login → Dashboard → violation trigger → escalation flow.
+> Full system walkthrough in [`ARCHITECTURE_NOTES.md`](ARCHITECTURE_NOTES.md).
 
 ---
 
-## 🏗️ System Architecture
+## ✨ Key Features
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Camera Feeds (RTSP/CSI)                  │
-└────────────────────────┬────────────────────────────────────┘
-                         │
-                         ▼
-┌─────────────────────────────────────────────────────────────┐
-│              NVIDIA DeepStream Pipeline (Jetson)            │
-│  ┌──────────────┬──────────────┬──────────────────────────┐ │
-│  │ YOLOv8-TRT   │  DeepSORT    │   PaddleOCR              │ │
-│  │ (Detection)  │  (Tracking)  │   (Asset Recognition)    │ │
-│  └──────────────┴──────────────┴──────────────────────────┘ │
-└────────────────────────┬────────────────────────────────────┘
-                         │
-                         ▼
-┌─────────────────────────────────────────────────────────────┐
-│                  FastAPI Backend Server                     │
-│  ┌──────────────────────────────────────────────────────┐  │
-│  │  - Violation Alert Logic                             │  │
-│  │  - PostgreSQL Logging                                │  │
-│  │  - Real-time Dashboard (WebSocket)                   │  │
-│  └──────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────┘
-```
-
-[View Detailed Architecture →](docs/ARCHITECTURE.md)
+- **Real-time PPE detection** — YOLOv8 detects missing helmet, vest, hardhat, gloves, and goggles across live RTSP/webcam streams
+- **ByteTrack multi-person tracking** — persistent worker track IDs across frames, even through occlusions
+- **LangGraph autonomous agent** — 8-node StateGraph: detect → check history → score severity → decide alert level → generate report → send alert → log to DB → update compliance
+- **MediaPipe pose hazard detection** — identifies dangerous bending, fatigue posture, fall events, and restricted zone reaching in parallel with PPE model
+- **Worker identity & risk scoring** — DeepFace face enrollment + 7-day recency-weighted rolling risk score per worker with HR escalation
+- **RAG safety chatbot** — LangChain + ChromaDB retrieval over your own safety procedure documents
+- **MLOps with canary deployment** — MLflow model registry, hash-based traffic splitting between production and canary model, automated evaluation and rollback
+- **SHAP explainability** — per-detection saliency maps showing exactly why a violation was flagged
+- **Multi-site & shift management** — register multiple physical locations, manage shifts, track per-site compliance
+- **Production-ready** — 60+ REST endpoints across 30 routers, Bearer token auth, 4-role RBAC, multi-tenant SaaS, OSHA/ISO 45001 immutable audit log, Docker + Railway deploy configs included
 
 ---
 
-## 🚀 Features
+## 🛠️ Tech Stack
 
-### 1. PPE Detection (YOLOv8)
-- **Classes**: Helmet, Safety Vest, Goggles, Boots, Gloves, Person (no PPE)
-- **Model**: YOLOv8x fine-tuned on custom dataset (15,000+ images)
-- **Optimization**: TensorRT INT8 quantization for 3x speedup
-- **Performance**: 95.2% mAP@0.5, 35 FPS on Jetson Xavier NX
-
-### 2. Multi-Object Tracking (DeepSORT)
-- Persistent ID assignment across frames
-- Cross-camera re-identification using ResNet50 features
-- Handles occlusions and temporary disappearances
-- Tracks 20+ workers simultaneously per camera
-
-### 3. OCR-Based Asset Identification (PaddleOCR)
-- Text detection using EAST/CRAFT algorithms
-- Text recognition with CRNN + Attention mechanism
-- Preprocesses: Perspective correction, denoising, contrast enhancement
-- 92% accuracy on industrial labels (varied lighting, angles)
-
-### 4. Edge Deployment
-- **Hardware**: NVIDIA Jetson Xavier NX (8GB)
-- **Framework**: DeepStream SDK 6.3 for multi-stream processing
-- **Optimization**: TensorRT, hardware-accelerated encoding/decoding
-- **Containerization**: Docker with NVIDIA runtime support
-
-### 5. Monitoring & Alerts
-- Real-time violation alerts (email/SMS/dashboard)
-- PostgreSQL database for comprehensive logging
-- Streamlit dashboard for zone-wise analytics
-- Historical trend analysis and reporting
+| Category | Technology | Purpose |
+|---|---|---|
+| Detection | YOLOv8 (ultralytics 8.2.18) | PPE violation classification on live frames |
+| Tracking | ByteTrack (supervision 0.21) | Multi-person track ID persistence |
+| Pose Analysis | MediaPipe 0.10 | Body keypoint physical hazard detection |
+| Face Identity | DeepFace 0.0.93 | Worker enrollment & 1:N recognition |
+| AI Agent | LangGraph 0.2.35 | Stateful 8-node autonomous safety workflow |
+| LLM | Ollama / OpenAI (configurable) | Severity scoring & incident narrative generation |
+| RAG | LangChain 0.2 + ChromaDB 0.5 | Safety document Q&A chatbot |
+| Explainability | SHAP 0.45 | Detection saliency maps |
+| MLOps | MLflow | Model registry + canary deployment traffic splitting |
+| API | FastAPI 0.111 + Pydantic v2 | 39 REST endpoints with OpenAPI docs |
+| ORM | SQLModel + aiosqlite / PostgreSQL | Async database layer |
+| Auth | Bearer token + RBAC | 4 roles: viewer / operator / manager / admin |
+| Frontend | React 19 + Vite 8 | 12-tab responsive dashboard UI |
+| Deploy | Docker Compose + Railway | Container + one-click cloud deploy |
 
 ---
 
-## 📦 Installation
-
-### Prerequisites
-- NVIDIA Jetson Xavier NX / Nano (JetPack 5.0+)
-- Python 3.8+
-- CUDA 11.4+, cuDNN 8.6+
-- DeepStream SDK 6.3
-
-### Option 1: Docker (Recommended)
-```bash
-# Pull pre-built image
-docker pull chandrukumar/industrial-safety:latest
-
-# Run container
-docker run --runtime nvidia --gpus all \
-  -v /tmp/argus_socket:/tmp/argus_socket \
-  -v $(pwd)/data:/app/data \
-  -p 8000:8000 \
-  chandrukumar/industrial-safety:latest
-```
-
-### Option 2: Manual Installation
-```bash
-# Clone repository
-git clone https://github.com/chandrukumar/industrial-safety-monitoring.git
-cd industrial-safety-monitoring
-
-# Create virtual environment
-python3 -m venv venv
-source venv/bin/activate
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Install DeepStream Python bindings
-cd /opt/nvidia/deepstream/deepstream/lib
-python3 setup.py install
-
-# Download pre-trained models
-bash scripts/download_models.sh
-```
-
----
-
-## 🎮 Quick Start
-
-### 1. Configure Camera Streams
-Edit `configs/camera_config.yaml`:
-```yaml
-cameras:
-  - name: "Zone_A_Entrance"
-    rtsp_url: "rtsp://192.168.1.100:554/stream"
-    enabled: true
-  - name: "Zone_B_Assembly"
-    rtsp_url: "rtsp://192.168.1.101:554/stream"
-    enabled: true
-```
-
-### 2. Run Inference
-```bash
-# Single camera mode
-python src/inference.py --config configs/camera_config.yaml --camera 0
-
-# Multi-camera mode (DeepStream)
-python src/deepstream_pipeline.py --config configs/deepstream_config.txt
-
-# With OCR enabled
-python src/inference.py --enable-ocr --ocr-regions configs/ocr_zones.json
-```
-
-### 3. Start Dashboard
-```bash
-streamlit run src/dashboard.py --server.port 8501
-```
-
-Open browser: `http://localhost:8501`
-
----
-
-## 📊 Model Performance
-
-### PPE Detection (YOLOv8x-TRT)
-| Class        | Precision | Recall | mAP@0.5 |
-|--------------|-----------|--------|---------|
-| Helmet       | 96.3%     | 94.8%  | 95.8%   |
-| Safety Vest  | 97.1%     | 93.5%  | 96.2%   |
-| Goggles      | 92.4%     | 89.7%  | 91.3%   |
-| Boots        | 90.8%     | 88.2%  | 89.7%   |
-| Person       | 98.2%     | 96.5%  | 97.9%   |
-| **Overall**  | **94.9%** | **92.5%** | **95.2%** |
-
-### Multi-Object Tracking (DeepSORT)
-- **MOTA** (Multiple Object Tracking Accuracy): 89.7%
-- **IDF1** (ID F1 Score): 87.3%
-- **FP** (False Positives): 2.1%
-- **FN** (False Negatives): 8.2%
-
-### OCR Performance (PaddleOCR)
-- **Character Accuracy**: 92.1%
-- **String Accuracy** (full label): 87.5%
-- **Processing Time**: 45ms per label
-- **Supported Formats**: Alphanumeric, QR codes, barcodes
-
-### Inference Speed
-| Hardware         | FPS (Single) | FPS (4 Streams) |
-|------------------|--------------|-----------------|
-| Jetson Nano      | 12           | 3               |
-| Jetson Xavier NX | 35           | 8.5             |
-| RTX 3080         | 145          | 40              |
-
----
-
-## 📁 Project Structure
+## 🏗️ Architecture
 
 ```
 industrial-safety-monitoring/
-├── README.md
-├── requirements.txt
-├── Dockerfile
-├── docker-compose.yml
-├── LICENSE
 │
-├── configs/
-│   ├── camera_config.yaml
-│   ├── model_config.yaml
-│   ├── deepstream_config.txt
-│   └── ocr_zones.json
+├── backend/
+│   ├── main.py               # FastAPI app factory, CORS, Bearer auth middleware
+│   ├── pipeline.py           # CV inference worker thread (never blocks event loop)
+│   ├── models.py             # SQLModel ORM + Pydantic v2 schemas
+│   ├── database.py           # Async SQLAlchemy engine, session factory, init_db
+│   │
+│   ├── agent/                # LangGraph autonomous safety agent
+│   │   ├── graph.py          # StateGraph + conditional routing logic
+│   │   ├── nodes.py          # 8 individual agent node functions
+│   │   ├── state.py          # AgentState TypedDict definition
+│   │   └── tools.py          # DB query tools used by nodes
+│   │
+│   ├── identity/             # Worker identity subsystem
+│   │   ├── face_recognizer.py    # DeepFace enrollment + matching
+│   │   ├── risk_scorer.py        # 7-day recency-weighted risk score
+│   │   └── face_blurrer.py       # Privacy: blur faces before storage
+│   │
+│   ├── mlops/                # MLOps pipeline
+│   │   ├── model_registry.py     # MLflow model version management
+│   │   ├── canary_router.py      # Hash-based traffic splitting
+│   │   └── canary_evaluator.py   # Automated canary pass/fail logic
+│   │
+│   ├── alerts/               # Fire detection engine + alert dispatcher
+│   ├── cameras/              # RTSP stream manager + multi-camera registry
+│   ├── rag/                  # ChromaDB + LangChain knowledge base
+│   ├── reports/              # Weekly compliance PDF report generator
+│   ├── webhooks/             # Outbound webhook dispatcher (Slack/Teams/JIRA)
+│   └── routes/               # 24 FastAPI route files → 39 endpoints total
 │
-├── src/
-│   ├── __init__.py
-│   ├── detection.py          # YOLOv8 inference
-│   ├── tracking.py           # DeepSORT tracker
-│   ├── ocr_module.py         # PaddleOCR integration
-│   ├── inference.py          # Main inference script
-│   ├── deepstream_pipeline.py # DeepStream multi-stream
-│   ├── dashboard.py          # Streamlit dashboard
-│   ├── alert_system.py       # Violation alerts
-│   └── utils/
-│       ├── video.py
-│       ├── visualization.py
-│       └── database.py
+├── frontend/
+│   └── src/components/       # 26 React components (12-tab dashboard)
 │
-├── models/
-│   ├── yolov8x_ppe.pt        # PyTorch checkpoint
-│   ├── yolov8x_ppe.engine    # TensorRT engine
-│   ├── deepsort_reid.pth     # ReID model
-│   └── paddleocr/            # OCR models
-│
-├── notebooks/
-│   ├── 01_data_exploration.ipynb
-│   ├── 02_model_training.ipynb
-│   ├── 03_tensorrt_optimization.ipynb
-│   └── 04_results_analysis.ipynb
-│
-├── scripts/
-│   ├── train.py
-│   ├── export_tensorrt.py
-│   ├── annotate_data.py
-│   ├── download_models.sh
-│   └── deploy.sh
-│
-├── tests/
-│   ├── test_detection.py
-│   ├── test_tracking.py
-│   └── test_ocr.py
-│
-├── docs/
-│   ├── ARCHITECTURE.md
-│   ├── DEPLOYMENT.md
-│   ├── API_REFERENCE.md
-│   └── TRAINING_GUIDE.md
-│
-└── assets/
-    ├── demo.gif
-    ├── architecture.png
-    ├── results_chart.png
-    └── sample_outputs/
+├── docker/                   # Dockerfile.backend + Dockerfile.frontend
+├── docker-compose.yml        # Full-stack local dev
+└── railway.toml              # Railway.app one-click cloud deploy config
 ```
 
 ---
 
-## 🔧 Training Your Own Model
+## ⚡ Quick Start
 
-### 1. Prepare Dataset
+### 1. Clone & Install Backend
+
 ```bash
-# Download sample dataset (COCO format)
-bash scripts/download_dataset.sh
+git clone https://github.com/chandrukumar/industrial-safety-monitoring
+cd industrial-safety-monitoring
 
-# Or use your own data
-python scripts/convert_to_coco.py --input data/raw --output data/coco
+# Create virtualenv
+python -m venv .venv
+.venv\Scripts\activate        # Windows
+# source .venv/bin/activate   # Linux / Mac
+
+pip install -r requirements.txt
 ```
 
-### 2. Annotate Data (CVAT)
-- Export annotations in COCO format
-- Classes: helmet, vest, goggles, boots, gloves, person
+### 2. Configure Environment
 
-### 3. Train YOLOv8
 ```bash
-python scripts/train.py \
-  --data configs/ppe_dataset.yaml \
-  --model yolov8x.pt \
-  --epochs 100 \
-  --batch 16 \
-  --imgsz 640 \
-  --device 0
+cp .env.example .env
 ```
 
-### 4. Export to TensorRT
-```bash
-python scripts/export_tensorrt.py \
-  --weights runs/train/exp/weights/best.pt \
-  --device 0 \
-  --precision int8 \
-  --calibration-images data/calibration/
+Edit `.env` — minimum required:
+
+```env
+API_KEY=your-secret-key-here
+DEMO_MODE=true              # true = no camera needed (great for portfolio)
+DATABASE_URL=sqlite+aiosqlite:///./safety_monitor.db
 ```
 
-[Full Training Guide →](docs/TRAINING_GUIDE.md)
+### 3. Run Backend
+
+```bash
+python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
+# API docs: http://localhost:8000/docs
+```
+
+### 4. Run Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev
+# Dashboard: http://localhost:5173
+```
+
+### One-click start (Windows)
+
+```bash
+start-dev.bat
+```
 
 ---
 
-## 🌐 API Reference
+## 🔌 API Endpoints
 
-### REST API Endpoints
+All endpoints require `Authorization: Bearer <API_KEY>` header (except `/health`).
 
-**Base URL**: `http://localhost:8000`
+| Method | Path | Description |
+|---|---|---|
+| GET | `/health` | System health + pipeline status (public) |
+| GET | `/detections` | Violation event log with filters |
+| GET | `/detections/stats` | Violation counts by class and zone |
+| GET | `/heatmap` | Violation density heatmap image (PNG or JSON) |
+| GET | `/shap/{track_id}` | SHAP saliency explanation for a detection |
+| GET/POST | `/workers` | Worker profiles list + create |
+| GET | `/workers/dashboard/risk` | Risk dashboard — top offenders, HR alerts |
+| GET | `/workers/{id}/risk` | Per-worker 7-day rolling risk score |
+| GET/POST | `/cameras` | Camera registry CRUD + RTSP management |
+| GET/POST | `/zones` | Zone definitions + PPE requirements per zone |
+| GET/POST | `/webhooks` | Outbound webhook CRUD + delivery test |
+| POST | `/webhooks/{id}/test` | Fire a test payload to verify webhook |
+| GET | `/mlops/models` | All registered model versions (MLflow) |
+| GET | `/mlops/canary/status` | Active canary deployment + traffic split |
+| GET | `/agent/status` | LangGraph agent config + enabled state |
+| GET | `/agent/runs` | Agent run history with trace steps |
+| GET | `/export/violations.csv` | Download violation log as CSV |
+| GET | `/export/workers.csv` | Download worker compliance data as CSV |
+| GET | `/audit` | OSHA/ISO 45001 immutable audit log |
+| GET | `/chat` | RAG chatbot query over safety documents |
+| GET/POST | `/sites` | Multi-site registration and management |
+| GET/POST | `/shifts` | Shift schedule management |
+| GET | `/reports` | Incident report list |
+| GET | `/reports/stats/summary` | Report statistics |
 
-#### Get Real-Time Detections
-```bash
-GET /api/v1/detections?camera_id=zone_a
-```
-
-Response:
-```json
-{
-  "camera_id": "zone_a",
-  "timestamp": "2025-01-28T10:30:45",
-  "detections": [
-    {
-      "track_id": 12,
-      "class": "person",
-      "bbox": [100, 150, 250, 400],
-      "confidence": 0.95,
-      "ppe_status": {
-        "helmet": true,
-        "vest": false,
-        "goggles": true
-      },
-      "violation": "missing_vest"
-    }
-  ]
-}
-```
-
-#### Get Violations Log
-```bash
-GET /api/v1/violations?start_date=2025-01-01&end_date=2025-01-28
-```
-
-[Full API Documentation →](docs/API_REFERENCE.md)
+Full interactive docs: **`http://localhost:8000/docs`**
 
 ---
 
-## 🐳 Docker Deployment
+## 🌍 Environment Variables
 
-### Build Image
-```bash
-docker build -t industrial-safety:latest .
-```
+| Variable | Default | Description |
+|---|---|---|
+| `API_KEY` | `""` | Bearer token for all API endpoints |
+| `SECRET_KEY` | — | JWT / session signing key |
+| `DATABASE_URL` | `sqlite+aiosqlite:///./safety_monitor.db` | DB connection string |
+| `MODEL_PATH` | `models/best.pt` | Path to YOLOv8 weights file |
+| `VIDEO_SOURCE` | `0` | Webcam index or `rtsp://...` URL |
+| `DEVICE` | `cpu` | Inference device: `cpu` or `cuda` |
+| `CONFIDENCE_THRESHOLD` | `0.35` | YOLOv8 detection confidence threshold |
+| `IOU_THRESHOLD` | `0.45` | Non-max suppression IOU threshold |
+| `DEMO_MODE` | `false` | `true` = serve synthetic data (no camera required) |
+| `CORS_ORIGINS` | `http://localhost:5173` | Comma-separated allowed frontend origins |
+| `RBAC_ENABLED` | `false` | Enable role-based access control |
+| `OLLAMA_BASE_URL` | `http://localhost:11434` | LLM endpoint for agent severity scoring |
+| `MLFLOW_TRACKING_URI` | `sqlite:///mlflow/mlflow.db` | MLflow backend store |
+| `CONTACT_EMAIL` | — | Shown in OpenAPI docs contact info |
 
-### Docker Compose (Full Stack)
+See `.env.example` for the full list.
+
+---
+
+## 🐳 Docker
+
 ```bash
+# Full stack (backend + frontend + DB)
 docker-compose up -d
+
+# Backend only
+docker build -f docker/Dockerfile.backend -t safety-backend .
+docker run -p 8000:8000 --env-file .env safety-backend
 ```
 
-Services:
-- **inference**: DeepStream pipeline (Port 8000)
-- **dashboard**: Streamlit UI (Port 8501)
-- **postgres**: Database (Port 5432)
-- **redis**: Caching (Port 6379)
+---
+
+## ☁️ Deploy to Railway
+
+```bash
+# 1. Push to GitHub
+git push origin main
+
+# 2. Go to railway.app → New Project → Deploy from GitHub repo
+# 3. Add a PostgreSQL plugin
+# 4. Set env vars in Railway dashboard (API_KEY, DATABASE_URL, etc.)
+# 5. Railway auto-builds from docker/Dockerfile.backend
+```
+
+`railway.toml` is already configured — zero extra setup needed.
 
 ---
 
-## 📈 Results & Demo
+## 📁 Database Schema (key tables)
 
-### Sample Outputs
-![Detection Results](assets/detection_results.png)
-*Real-time PPE detection with bounding boxes and violation alerts*
-
-![Tracking](assets/tracking_demo.gif)
-*Multi-object tracking with persistent IDs across frames*
-
-![OCR](assets/ocr_results.png)
-*Asset identification via OCR on equipment labels*
-
-### Performance Charts
-![Metrics](assets/performance_charts.png)
+| Table | Purpose |
+|---|---|
+| `violation_events` | Every PPE violation detected (class, zone, confidence, track_id) |
+| `worker_profiles` | Worker identity, face embedding, risk score, HR alert status |
+| `worker_violations` | Junction: worker ↔ violation event |
+| `camera_registry` | RTSP cameras, status, fps, last seen |
+| `camera_zones` | Zone polygons + required PPE per zone |
+| `agent_runs` | LangGraph agent execution history + trace steps |
+| `incident_reports` | Auto-generated incident reports with narrative |
+| `audit_log` | Immutable OSHA/ISO 45001 compliance audit trail |
+| `webhooks` | Registered outbound webhooks (Slack / Teams / JIRA) |
+| `model_deployments` | MLflow canary deployment tracking |
+| `sites` | Multi-site physical location registry |
+| `shifts` | Shift schedules per site |
 
 ---
 
-## 🛣️ Roadmap
+## 🗺️ Roadmap
 
-- [x] YOLOv8 PPE detection
-- [x] DeepSORT tracking
-- [x] PaddleOCR integration
-- [x] TensorRT optimization
-- [x] DeepStream multi-stream
-- [ ] Anomaly detection (unusual behavior)
-- [ ] Action recognition (working at height, confined space)
-- [ ] Cloud sync for multi-site analytics
-- [ ] Mobile app for supervisors
+- [x] YOLOv8 PPE detection pipeline
+- [x] ByteTrack multi-person tracking
+- [x] LangGraph 8-node autonomous safety agent
+- [x] MediaPipe body-pose hazard detection
+- [x] DeepFace worker identity + face enrollment
+- [x] SHAP explainability endpoint
+- [x] MLflow model registry + canary deployment
+- [x] RAG safety chatbot (LangChain + ChromaDB)
+- [x] 39 REST API endpoints + React dashboard
+- [x] OSHA/ISO 45001 audit log
+- [x] Docker + Railway deploy configs
+- [ ] Train domain-specific YOLOv8 model on manufacturing dataset
+- [ ] Enable Ollama LLM for live AI-written incident narratives
+- [ ] PostgreSQL + Redis for horizontal scaling
+- [ ] Mobile supervisor app (React Native)
+
+---
+
+## 🧪 Testing
+
+```bash
+# Install dev dependencies
+pip install -r requirements-dev.txt
+
+# Run full test suite (116 tests)
+pytest tests/ -v
+
+# Run with coverage report
+pytest tests/ --cov=backend --cov-report=term-missing
+```
+
+**116 tests, all passing.** Coverage areas:
+- ✅ Authentication & RBAC (401/403 regression tests)
+- ✅ Health + liveness/readiness probes (DB dependency check)
+- ✅ Worker profiles & risk scoring (route ordering regression)
+- ✅ Camera registry (rtsp:// Pydantic regression)
+- ✅ Zones (NULL zone_type regression)
+- ✅ MLOps endpoints (asyncio import regression)
+- ✅ Reports & audit log + CSV/JSON export
+- ✅ Enterprise: organizations, billing, escalation, permits, attendance, industry PPE (47 tests)
+- ✅ Pydantic v2 model validation
+
+---
+
+## 🗄️ Database Migrations (Alembic)
+
+All schema changes are managed through versioned Alembic migrations.
+**Never edit the DB directly.**
+
+```bash
+# Apply all pending migrations (first-time setup)
+alembic upgrade head
+
+# Check current migration version
+alembic current
+
+# Create a new migration after changing models.py
+alembic revision --autogenerate -m "describe your change"
+
+# Rollback last migration
+alembic downgrade -1
+
+# Preview SQL without applying
+alembic upgrade head --sql
+```
 
 ---
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please follow these steps:
+See [CONTRIBUTING.md](CONTRIBUTING.md) for full developer guide including:
+- Local setup instructions
+- Commit conventions (Conventional Commits)
+- How to add new API endpoints
+- Alembic migration workflow
+- Code style (ruff + ESLint)
 
+Quick start:
 1. Fork the repository
-2. Create feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit changes (`git commit -m 'Add amazing feature'`)
-4. Push to branch (`git push origin feature/amazing-feature`)
-5. Open Pull Request
+2. Create a feature branch: `git checkout -b feat/your-feature`
+3. Make changes + write tests
+4. Run: `pytest tests/ -q && ruff check .`
+5. Commit: `git commit -m 'feat(scope): description'`
+6. Open a PR using the [PR template](.github/PULL_REQUEST_TEMPLATE.md)
 
 ---
 
 ## 📄 License
 
-This project is licensed under the MIT License - see [LICENSE](LICENSE) file for details.
-
----
-
-## 🙏 Acknowledgments
-
-- [Ultralytics YOLOv8](https://github.com/ultralytics/ultralytics) for object detection
-- [DeepSORT](https://github.com/nwojke/deep_sort) for multi-object tracking
-- [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR) for text recognition
-- NVIDIA DeepStream SDK for multi-stream processing
+MIT © Chandrukumar S — see [LICENSE](LICENSE) for details.
 
 ---
 
 ## 📧 Contact
 
 **Chandrukumar S**  
-📧 Email: kumarchandru646@gmail.com  
-🔗 LinkedIn: [linkedin.com/in/chandrukumar-s](https://linkedin.com/in/chandrukumar-s-69a673208)  
-🐙 GitHub: [@chandrukumar](https://github.com/chandrukumar)
+📧 kumarchandru646@gmail.com  
+🔗 [linkedin.com/in/chandrukumar-s-69a673208](https://linkedin.com/in/chandrukumar-s-69a673208)  
+🐙 [github.com/chandrukumar](https://github.com/chandrukumar)
 
 ---
 
-## ⭐ Support
-
-If you find this project useful, please consider:
-- ⭐ Starring the repository
-- 🍴 Forking for your own projects
-- 🐛 Reporting bugs and issues
-- 💡 Suggesting new features
-
----
+> ⭐ If this project helped you, please star the repository — it helps others find it.
 
 **Built with ❤️ for Industrial Safety**

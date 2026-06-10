@@ -1,0 +1,190 @@
+# docker-compose.yml
+# Industrial Safety Monitor — Full Stack with PostgreSQL
+#
+# One-command startup:
+#   cp .env.example .env   # fill in API_KEY, SECRET_KEY etc.
+#   docker compose up -d
+#
+# Services:
+#   postgres  — PostgreSQL 16 (primary database)
+#   backend   — FastAPI + YOLOv8 + LangGraph (port 8000)
+#   frontend  — React/Vite served by nginx (port 80)
+#   mlflow    — Experiment & model tracking (port 5000)
+#   pgadmin   — PostgreSQL web UI for dev (port 5050)  ← override only
+
+volumes:
+  postgres_data:       # persistent DB storage
+  model_data:          # YOLO model weights (mounted at runtime)
+  mlflow_data:         # MLflow runs + artifacts
+  chroma_data:         # ChromaDB vector store
+
+networks:
+  safety-net:
+    driver: bridge
+
+services:
+
+  # ── PostgreSQL ─────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: safety-postgres
+    restart: unless-stopped
+    networks:
+      - safety-net
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    environment:
+      POSTGRES_DB: safety_monitor
+      POSTGRES_USER: safety
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-safety_dev_only}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U safety -d safety_monitor"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    mem_limit: 512m
+    cpus: "0.5"
+
+  # ── Backend ────────────────────────────────────────────────
+  backend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+    image: safety-monitor-backend:latest
+    container_name: safety-backend
+    restart: unless-stopped
+    stop_grace_period: 30s
+    networks:
+      - safety-net
+    ports:
+      - "8000:8000"
+    volumes:
+      - model_data:/app/models
+      - ./data:/app/data:ro
+      - chroma_data:/app/rag/chroma_db
+    # Uncomment for physical webcam:
+    # devices:
+    #   - /dev/video0:/dev/video0
+    mem_limit: 3g
+    cpus: "2.0"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mlflow:
+        condition: service_started
+    environment:
+      - APP_ENV=production
+      - PORT=8000
+      - MODEL_PATH=/app/models/best.pt
+      - VIDEO_SOURCE=${VIDEO_SOURCE:-0}
+      - DEVICE=${DEVICE:-cpu}
+      - CONFIDENCE_THRESHOLD=${CONFIDENCE_THRESHOLD:-0.35}
+      - IOU_THRESHOLD=${IOU_THRESHOLD:-0.45}
+      - FRAME_SKIP=${FRAME_SKIP:-1}
+      # PostgreSQL connection
+      - DATABASE_URL=postgresql+asyncpg://safety:${POSTGRES_PASSWORD:-safety_dev_only}@postgres:5432/safety_monitor
+      - DB_POOL_SIZE=10
+      - DB_MAX_OVERFLOW=20
+      # MLflow
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+      # CORS — browser-facing origin
+      - CORS_ORIGINS=http://localhost:80,http://localhost:5173,${EXTRA_CORS_ORIGINS:-}
+      - LOG_LEVEL=INFO
+      # Auth — MUST be set in .env
+      - API_KEY=${API_KEY:?Set API_KEY in .env (openssl rand -hex 32)}
+      - SECRET_KEY=${SECRET_KEY:?Set SECRET_KEY in .env (openssl rand -hex 32)}
+      # RBAC
+      - RBAC_ENABLED=${RBAC_ENABLED:-false}
+      - ADMIN_API_KEY=${ADMIN_API_KEY:-}
+      # Demo mode
+      - DEMO_MODE=${DEMO_MODE:-false}
+      # Webhooks
+      - WEBHOOK_TIMEOUT_SECONDS=${WEBHOOK_TIMEOUT_SECONDS:-10.0}
+      - WEBHOOK_MAX_RETRIES=${WEBHOOK_MAX_RETRIES:-3}
+      - WEBHOOK_SIGNING_SECRET=${WEBHOOK_SIGNING_SECRET:-}
+      # Alerts
+      - TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID:-}
+      - TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN:-}
+      - TWILIO_WHATSAPP_FROM=${TWILIO_WHATSAPP_FROM:-}
+      - SMTP_HOST=${SMTP_HOST:-smtp.gmail.com}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USERNAME=${SMTP_USERNAME:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      # AI / LLM
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      # RAG
+      - CHROMA_PERSIST_DIR=/app/rag/chroma_db
+      - RAG_TOP_K=${RAG_TOP_K:-5}
+      # Export
+      - EXPORT_MAX_ROWS=${EXPORT_MAX_ROWS:-50000}
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 5
+
+  # ── Frontend ───────────────────────────────────────────────
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.frontend
+      args:
+        VITE_API_URL: ""
+        VITE_WS_URL: ""
+    image: safety-monitor-frontend:latest
+    container_name: safety-frontend
+    restart: unless-stopped
+    networks:
+      - safety-net
+    ports:
+      - "80:80"
+    mem_limit: 256m
+    cpus: "0.3"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/health.txt"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ── MLflow ─────────────────────────────────────────────────
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.13.0
+    container_name: safety-mlflow
+    command: >
+      mlflow server
+      --host 0.0.0.0
+      --port 5000
+      --backend-store-uri postgresql://safety:${POSTGRES_PASSWORD:-safety_dev_only}@postgres:5432/mlflow_runs
+      --default-artifact-root /mlflow/artifacts
+    restart: unless-stopped
+    networks:
+      - safety-net
+    ports:
+      - "5000:5000"
+    volumes:
+      - mlflow_data:/mlflow
+    mem_limit: 512m
+    cpus: "0.5"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - MLFLOW_HOST=0.0.0.0
+      - MLFLOW_PORT=5000
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s

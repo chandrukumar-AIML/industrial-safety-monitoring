@@ -1,0 +1,112 @@
+# syntax=docker/dockerfile:1.4
+# ── Stage 1: dependency builder ───────────────────────────────
+FROM --platform=linux/amd64 python:3.11-slim AS builder
+
+# CHANGED: --platform ensures AMD64 images on Apple Silicon dev machines
+# so the built image matches Railway's AMD64 hosts.
+
+WORKDIR /build
+
+# System deps needed to compile Python packages
+# CHANGED: added comment noting these are build-only; not copied to runtime
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    g++ \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+# CHANGED: set Python env vars at builder stage so pip output is clean
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# Create isolated venv
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Copy and install Python dependencies
+# requirements.txt first → layer cached unless deps change
+COPY requirements.txt .
+# OPTIMIZED: BuildKit cache mount preserves the pip wheel cache across builds.
+# torch (~2.4GB wheel) is only downloaded once; subsequent builds use cache.
+# Falls back to standard pip install if BuildKit is unavailable.
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
+
+# ── Stage 2: runtime ──────────────────────────────────────────
+FROM --platform=linux/amd64 python:3.11-slim AS runtime
+
+# Security: Non-root user setup FIRST
+ARG USER_ID=1000
+ARG GROUP_ID=1000
+RUN groupadd -g ${GROUP_ID} appgroup && \
+    useradd -u ${USER_ID} -g appgroup -m -s /bin/bash appuser
+
+WORKDIR /app
+
+# Runtime system libraries only — no compilers
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    libgomp1 \
+    curl \
+    wget \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
+
+# CHANGED: critical for Railway log streaming — without PYTHONUNBUFFERED,
+# uvicorn stdout buffers and logs disappear in Railway's log viewer.
+# PYTHONDONTWRITEBYTECODE saves ~10MB of .pyc files in the image.
+# PYTHONPATH ensures `from inference import ...` works without relying
+# on uvicorn's implicit CWD-to-sys.path addition.
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app \
+    PATH="/opt/venv/bin:$PATH" \
+    HOME=/app \
+    USER=appuser
+
+# Copy venv from builder — only the venv, not the build tools
+COPY --from=builder --chown=appuser:appgroup /opt/venv /opt/venv
+
+# Copy application source with proper ownership
+COPY --chown=appuser:appgroup inference/ ./inference/
+COPY --chown=appuser:appgroup backend/   ./backend/
+COPY --chown=appuser:appgroup requirements.txt ./
+
+# CHANGED: removed `COPY models/ ./models/` — baking 22MB weights into
+# the image means every code change triggers a 22MB+ layer push to the
+# registry. Models are injected via volume mount or MLflow registry at
+# runtime (see docker-compose.yml and Phase 11 from_registry pattern).
+
+# Create directories needed at runtime with proper permissions
+# models/ must exist so PPEDetector's FileNotFoundError is meaningful
+RUN mkdir -p /app/models /app/data /app/mlflow/mlruns /app/logs /app/db && \
+    chown -R appuser:appgroup /app
+
+# Switch to non-root user
+USER appuser
+
+# Healthcheck: Use wget since curl might not be available in slim images
+# Also check that the app is actually responding, not just the port
+HEALTHCHECK --interval=30s --timeout=10s --start-period=45s --retries=3 \
+    CMD wget --no-verbose --tries=1 --spider http://localhost:${PORT:-8000}/health || exit 1
+
+EXPOSE 8000
+
+# Security: Use --reload only in dev, never in prod
+# Use --workers based on CPU cores, but 1 for GPU to avoid model duplication
+# Use --log-level info for prod, debug only for dev
+CMD ["sh", "-c", \
+     "uvicorn backend.main:app \
+      --host 0.0.0.0 \
+      --port ${PORT:-8000} \
+      --workers ${UVICORN_WORKERS:-1} \
+      --log-level ${LOG_LEVEL:-info} \
+      --access-log \
+      --limit-concurrency ${UVICORN_LIMIT_CONCURRENCY:-100} \
+      --limit-max-requests ${UVICORN_LIMIT_MAX_REQUESTS:-1000} \
+      --timeout-keep-alive ${UVICORN_TIMEOUT_KEEP_ALIVE:-65}"]

@@ -1,0 +1,101 @@
+# railway.toml
+# Docs: https://docs.railway.app/reference/config-as-code
+#
+# SECURITY NOTE: Never add SECRET_KEY, DATABASE_URL, or any credential
+# to this file — it is committed to git. Set secrets via:
+#   railway variables set --service <name> KEY=value
+
+[build]
+builder = "DOCKERFILE"
+
+# ── Backend ───────────────────────────────────────────────────
+[[services]]
+name           = "backend"
+source         = "."
+dockerfilePath = "docker/Dockerfile.backend"
+
+[services.deploy]
+# CHANGED: single-line command — multi-line TOML heredoc strings may
+# not produce valid shell line continuations on Railway's runner.
+startCommand            = "uvicorn backend.main:app --host 0.0.0.0 --port $PORT --workers 1 --log-level info"
+healthcheckPath         = "/health"
+healthcheckTimeout      = 30
+restartPolicyType       = "ON_FAILURE"
+restartPolicyMaxRetries = 5
+
+[services.variables]
+APP_ENV              = "production"
+MODEL_PATH           = "/app/models/best.pt"
+DEVICE               = "cpu"
+FRAME_SKIP           = "2"
+CONFIDENCE_THRESHOLD = "0.35"
+IOU_THRESHOLD        = "0.45"
+LOG_LEVEL            = "INFO"
+LOAD_FROM_REGISTRY   = "true"
+PYTHONUNBUFFERED     = "1"
+
+# FIXED: VIDEO_SOURCE was absent — code defaults to 0 (webcam) when not set.
+# Railway containers have no webcam. cv2.VideoCapture(0) returns empty frames
+# and the pipeline exits immediately. Set to an RTSP URL or a bundled test clip.
+# Override via: railway variables set --service backend VIDEO_SOURCE=rtsp://...
+VIDEO_SOURCE         = "data/sample.mp4"
+
+# FIXED: CORS_ORIGINS was absent — code defaults to http://localhost:5173.
+# Every API call from the Railway frontend URL was blocked with CORS 403.
+# Replace with your actual Railway frontend public URL after first deploy.
+# Format: https://frontend-production-xxxx.up.railway.app
+CORS_ORIGINS         = "https://your-frontend.up.railway.app"
+
+# ── SECRETS — set via Railway dashboard or CLI, NEVER commit values ──────
+# These keys MUST be set before the backend will work correctly:
+#
+#   railway variables set --service backend API_KEY=$(openssl rand -hex 32)
+#   railway variables set --service backend SECRET_KEY=$(openssl rand -hex 32)
+#   railway variables set --service backend DATABASE_URL=sqlite+aiosqlite:////app/db/safety_monitor.db
+#
+# API_KEY   — Bearer token required for all protected API endpoints.
+#             If empty, authentication is PERMANENTLY DISABLED.
+# SECRET_KEY — Application secret; rotate every 90 days.
+# DATABASE_URL — Must point to Railway volume mount path for persistence.
+#               Without this, DB is lost on every redeploy.
+
+# ── Frontend ──────────────────────────────────────────────────
+[[services]]
+name           = "frontend"
+source         = "."
+dockerfilePath = "docker/Dockerfile.frontend"
+
+[services.build.args]
+# Empty = relative paths → Nginx proxy handles routing.
+# Set non-empty only if frontend is served from a different origin.
+VITE_API_URL = ""
+VITE_WS_URL  = ""
+
+[services.deploy]
+healthcheckPath         = "/health.txt"
+healthcheckTimeout      = 10
+restartPolicyType       = "ON_FAILURE"
+restartPolicyMaxRetries = 3
+
+# ── MLflow ────────────────────────────────────────────────────
+# FIXED: mlflow/Dockerfile does not exist in this repo.
+# Railway can run the official MLflow image directly via its Docker registry
+# integration. Set the service image to ghcr.io/mlflow/mlflow:v2.13.0
+# in the Railway dashboard → Settings → Source → Docker Image.
+# Start command:
+#   mlflow server --host 0.0.0.0 --port $PORT
+#              --backend-store-uri /mlflow/mlruns
+#              --default-artifact-root /mlflow/artifacts
+[[services]]
+name = "mlflow"
+
+[services.deploy]
+startCommand            = "mlflow server --host 0.0.0.0 --port $PORT --backend-store-uri /mlflow/mlruns --default-artifact-root /mlflow/artifacts"
+healthcheckPath         = "/health"
+healthcheckTimeout      = 15
+restartPolicyType       = "ON_FAILURE"
+restartPolicyMaxRetries = 3
+
+[services.variables]
+MLFLOW_HOST      = "0.0.0.0"
+PYTHONUNBUFFERED = "1"

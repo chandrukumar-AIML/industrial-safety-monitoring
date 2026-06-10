@@ -1,0 +1,239 @@
+/**
+ * frontend/src/index.css
+ *
+ * Global styles, Tailwind configuration, and custom utilities.
+ *
+ * # FIXED: Proper Tailwind layer ordering
+ * # IMPROVED: Custom scrollbar styling for dark theme
+ * # FIXED: Focus styles for accessibility
+ * # IMPROVED: Print styles for reports
+ */
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Base Styles ───────────────────────────────────────────── */
+@layer base {
+  html {
+    @apply antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+  
+  body {
+    @apply bg-[#0d1117] text-slate-100;
+    /* Prevent zoom on input focus in mobile */
+    touch-action: manipulation;
+  }
+  
+  /* Custom scrollbar for dark theme */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  
+  ::-webkit-scrollbar-track {
+    @apply bg-slate-900/50;
+  }
+  
+  ::-webkit-scrollbar-thumb {
+    @apply bg-slate-700 rounded-full hover:bg-slate-600 transition-colors;
+  }
+  
+  /* Firefox scrollbar */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: theme('colors.slate.700') theme('colors.slate.900/50');
+  }
+  
+  /* Focus styles for accessibility */
+  :focus-visible {
+    @apply outline-none ring-2 ring-blue-500/50 ring-offset-2 ring-offset-[#0d1117];
+  }
+  
+  /* Remove default focus outline for mouse users */
+  :focus:not(:focus-visible) {
+    @apply outline-none;
+  }
+}
+
+/* ── Component Styles ──────────────────────────────────────── */
+@layer components {
+  /* Card component */
+  .card {
+    @apply bg-[#161b22] border border-slate-800/60 rounded-xl p-4 
+           hover:border-slate-700/60 transition-colors;
+  }
+  
+  /* Button variants */
+  .btn {
+    @apply px-4 py-2 rounded-lg font-medium text-sm transition-all
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  
+  .btn-primary {
+    @apply btn bg-blue-600 hover:bg-blue-500 text-white;
+  }
+  
+  .btn-secondary {
+    @apply btn bg-slate-800 hover:bg-slate-700 text-slate-200;
+  }
+  
+  .btn-danger {
+    @apply btn bg-red-600 hover:bg-red-500 text-white;
+  }
+  
+  /* Input styles */
+  .input {
+    @apply w-full bg-slate-900/50 border border-slate-700 rounded-lg
+           px-3 py-2 text-sm text-slate-200 placeholder-slate-500
+           focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50
+           outline-none transition-colors;
+  }
+  
+  /* Table styles */
+  .table-container {
+    @apply overflow-x-auto rounded-lg border border-slate-800/60;
+  }
+  
+  .table {
+    @apply w-full text-sm text-left;
+  }
+  
+  .table th {
+    @apply px-4 py-3 bg-slate-900/50 text-slate-400 font-medium uppercase text-xs tracking-wider;
+  }
+  
+  .table td {
+    @apply px-4 py-3 border-t border-slate-800/40 text-slate-300;
+  }
+  
+  .table tr:hover {
+    @apply bg-slate-800/30;
+  }
+  
+  /* Badge styles */
+  .badge {
+    @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium;
+  }
+  
+  .badge-success {
+    @apply badge bg-emerald-500/10 text-emerald-400 border border-emerald-500/20;
+  }
+  
+  .badge-warning {
+    @apply badge bg-yellow-500/10 text-yellow-400 border border-yellow-500/20;
+  }
+  
+  .badge-danger {
+    @apply badge bg-red-500/10 text-red-400 border border-red-500/20;
+  }
+  
+  .badge-info {
+    @apply badge bg-blue-500/10 text-blue-400 border border-blue-500/20;
+  }
+}
+
+/* ── Utility Classes ───────────────────────────────────────── */
+@layer utilities {
+  /* Text truncation with ellipsis */
+  .truncate-1 {
+    @apply overflow-hidden text-ellipsis whitespace-nowrap;
+    display: -webkit-box;
+    -webkit-line-clamp: 1;
+    -webkit-box-orient: vertical;
+  }
+  
+  .truncate-2 {
+    @apply overflow-hidden text-ellipsis whitespace-nowrap;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+  
+  .truncate-3 {
+    @apply overflow-hidden text-ellipsis whitespace-nowrap;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+  }
+  
+  /* Smooth animations */
+  .animate-in {
+    animation: fadeIn 0.2s ease-out;
+  }
+  
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  
+  /* Print styles */
+  @media print {
+    /* Hide non-essential UI elements */
+    .no-print,
+    header,
+    footer,
+    button,
+    nav {
+      display: none !important;
+    }
+    
+    /* Ensure content is visible */
+    body {
+      @apply bg-white text-black;
+    }
+    
+    /* Adjust layout for print */
+    .print\:block {
+      display: block !important;
+    }
+    
+    .print\:full-width {
+      width: 100% !important;
+      max-width: none !important;
+    }
+  }
+}
+
+/* ── Custom Animations ─────────────────────────────────────── */
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+.animate-pulse-slow {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* ── Responsive Utilities ──────────────────────────────────── */
+/* Hide on mobile */
+.hidden-mobile {
+  @apply hidden md:block;
+}
+
+/* Hide on desktop */
+.hidden-desktop {
+  @apply block md:hidden;
+}
+
+/* ── Accessibility Helpers ─────────────────────────────────── */
+/* Screen reader only text */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+/* Skip to content link */
+.skip-link {
+  @apply sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 
+         focus:z-50 focus:px-4 focus:py-2 focus:bg-blue-600 focus:text-white 
+         focus:rounded-lg focus:outline-none;
+}

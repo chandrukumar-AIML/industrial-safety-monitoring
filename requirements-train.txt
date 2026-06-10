@@ -1,0 +1,16 @@
+# Include production dependencies
+-r requirements.txt
+
+# ── Augmentation ──────────────────────────────────────────
+albumentations==1.4.8
+imgaug==0.4.0
+
+# ── Experiment Tracking ───────────────────────────────────
+mlflow==2.13.0
+boto3==1.34.0                # MLflow artifact storage on S3-compatible stores
+
+# ── Evaluation & Visualization ────────────────────────────
+matplotlib==3.9.0
+seaborn==0.13.2
+scikit-learn==1.5.0
+# pandas already in requirements.txt — removed duplicate

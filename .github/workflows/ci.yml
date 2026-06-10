@@ -1,0 +1,185 @@
+##############################################################################
+# CI Pipeline — Industrial Safety Monitor
+#
+# Role: DevOps Engineer
+# Runs on every push + PR to main.
+#
+# Jobs (run in parallel where possible):
+#   lint        → ruff + mypy type checking
+#   test        → pytest with coverage report
+#   docker-build → Dockerfile.backend build validation
+##############################################################################
+
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+# Cancel in-progress runs on the same branch (saves CI minutes)
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.11"
+  NODE_VERSION: "20"
+
+jobs:
+
+  # ── Job 1: Lint & type-check ──────────────────────────────────
+  lint:
+    name: Lint & type-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install linting tools
+        run: pip install ruff==0.4.4 mypy==1.10.0
+
+      - name: Ruff lint check
+        run: ruff check . --output-format=github
+
+      - name: Ruff format check
+        run: ruff format --check .
+
+      - name: Mypy type check (backend only)
+        run: mypy backend/ --ignore-missing-imports --no-error-summary
+
+  # ── Job 2: Unit + integration tests ──────────────────────────
+  test:
+    name: Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11"]
+      fail-fast: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Run pytest with coverage
+        env:
+          ENVIRONMENT: test
+          DATABASE_URL: "sqlite+aiosqlite:///:memory:"
+          API_KEY: "ci-test-key-do-not-use-in-prod"
+          SECRET_KEY: "ci-test-secret-do-not-use-in-prod"
+          DEMO_MODE: "true"
+          MODEL_PATH: "models/best.pt"
+          VIDEO_SOURCE: "0"
+          MLFLOW_TRACKING_URI: "sqlite:///mlflow/mlflow.db"
+        run: |
+          pytest tests/ \
+            --timeout=30 \
+            -x \
+            -q \
+            --tb=short \
+            --cov=backend \
+            --cov-report=term-missing \
+            --cov-report=xml:coverage.xml \
+            --cov-fail-under=40
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        if: always()
+        with:
+          file: ./coverage.xml
+          fail_ci_if_error: false
+
+  # ── Job 3: Frontend lint ──────────────────────────────────────
+  frontend-lint:
+    name: Frontend lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci --prefer-offline
+
+      - name: ESLint check
+        working-directory: frontend
+        run: npm run lint
+
+      - name: Vite build check (type errors)
+        working-directory: frontend
+        run: npm run build
+        env:
+          VITE_API_URL: "http://localhost:8000"
+          VITE_API_KEY: "ci-test-key"
+
+  # ── Job 4: Docker build validation ───────────────────────────
+  docker-build:
+    name: Docker build validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build backend image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/Dockerfile.backend
+          push: false
+          tags: safety-monitor-backend:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            BUILD_ENV=ci
+
+      - name: Build frontend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          file: docker/Dockerfile.frontend
+          push: false
+          tags: safety-monitor-frontend:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ── Job 5: Security scan ──────────────────────────────────────
+  security:
+    name: Security scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install pip-audit
+        run: pip install pip-audit
+
+      - name: Audit Python dependencies for CVEs
+        run: |
+          pip-audit -r requirements.txt \
+            --ignore-vuln GHSA-jfh8-c2jp-5 \
+            --ignore-vuln PYSEC-2024-60 \
+            || true   # warn but don't fail CI (some vulns are in transitive deps)

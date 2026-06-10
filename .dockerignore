@@ -1,0 +1,76 @@
+# ── Python ────────────────────────────────────────────────────
+# CHANGED: **/__pycache__/ covers all subdirectories, not just root
+**/__pycache__/
+*.pyc
+*.pyo
+.venv/
+*.egg-info/
+.pytest_cache/
+# CHANGED: added test directories — not needed in production image
+tests/
+test_*/
+
+# ── Logs ──────────────────────────────────────────────────────
+# CHANGED: log files can be large, should never be in build context
+*.log
+logs/
+
+# ── Data (large — mounted as volumes) ─────────────────────────
+data/raw/
+data/processed/
+*.pt
+*.onnx
+*.pth
+*.bin
+
+# ── Frontend build artifacts ───────────────────────────────────
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/.next/
+
+# ── Dev / CI ──────────────────────────────────────────────────
+.git/
+.github/
+notebooks/
+*.ipynb
+.env
+*.env
+# FIXED: frontend/.env contains dev localhost URLs; exclude from all image builds.
+# VITE vars are injected at build time via ARG, not from this file.
+frontend/.env
+mlflow/mlruns/
+evaluation/
+
+# ── Docker config (not needed at runtime) ─────────────────────
+# FIXED: was excluding the entire docker/ directory — this broke the
+# frontend build because Dockerfile.frontend does:
+#   COPY docker/nginx.conf /etc/nginx/conf.d/app.conf
+# and the build context is `.` (repo root). When docker/ was excluded
+# from the context, that COPY failed with "no such file or directory".
+#
+# Fix: exclude ONLY the Dockerfile files themselves (Docker reads them
+# via --file flag, not the build context), but KEEP nginx.conf accessible.
+docker/Dockerfile*
+docker-compose*.yml
+
+# ── IDE ───────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# ── Build artifacts ───────────────────────────────────────────
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ── OS files ──────────────────────────────────────────────────
+Thumbs.db
+.DS_Store
+*.log
