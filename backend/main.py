@@ -208,6 +208,31 @@ async def lifespan(app: FastAPI):
     except Exception as _e:
         logger.warning("PPE profile seed failed (non-critical): {}", str(_e)[:80])
 
+    # ── Demo data auto-seed (cloud deploy convenience) ────────
+    # When DEMO_MODE=true and the database is empty (e.g. a fresh Render/Railway
+    # deploy with an ephemeral or new DB), populate it with synthetic demo data so
+    # the dashboard shows content out-of-the-box. Idempotent: only runs when empty.
+    if os.getenv("DEMO_MODE", "false").lower() == "true":
+        try:
+            from sqlalchemy import text as _text2
+            async with AsyncSessionLocal() as _s:
+                _r = await _s.exec(_text2("SELECT COUNT(*) FROM violation_events"))
+                _count = _r.scalar() if hasattr(_r, "scalar") else _r.fetchone()[0]
+            if not _count:
+                import importlib.util as _ilu
+                from pathlib import Path as _Path
+                _seed_path = _Path(__file__).resolve().parent.parent / "scripts" / "demo_seed.py"
+                if _seed_path.exists():
+                    _spec = _ilu.spec_from_file_location("demo_seed", _seed_path)
+                    _mod = _ilu.module_from_spec(_spec)
+                    _spec.loader.exec_module(_mod)
+                    await _mod.run_seed(reset=False)
+                    logger.info("Demo data auto-seeded on startup (DB was empty)")
+            else:
+                logger.info("Demo mode active | DB already has {} violations", _count)
+        except Exception as _e:
+            logger.warning("Demo auto-seed skipped (non-critical): {}", str(_e)[:120])
+
     # ── APScheduler — background jobs ─────────────────────────
     _scheduler = None
     try:

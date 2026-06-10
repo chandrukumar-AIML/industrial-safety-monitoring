@@ -11,8 +11,14 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
+// API base — '/api' (Vite proxy) in dev, the backend URL in production.
+const API_BASE = import.meta.env.VITE_API_URL || '/api'
+
 // Demo API key (the backend's dev key — used to authenticate demo accounts).
-const DEMO_KEY = '05ac3ecf4b9d6e8fc0a7f353d0d5023d83aa8b40bf4fb2ff277ab3f1eed5802a'
+// In production, VITE_DEMO_API_KEY overrides this to match the deployed backend.
+const DEMO_KEY = import.meta.env.VITE_DEMO_API_KEY
+  || import.meta.env.VITE_API_KEY
+  || '05ac3ecf4b9d6e8fc0a7f353d0d5023d83aa8b40bf4fb2ff277ab3f1eed5802a'
 
 // Demo accounts → resolve to the backend API key. Replace with real JWT auth in prod.
 const DEMO_ACCOUNTS = {
@@ -37,7 +43,7 @@ export default function LoginPage({ onLogin }) {
   const completeLogin = async (key, org) => {
     // Confirm the key actually works against the backend before entering the app.
     try {
-      const res = await fetch('/api/sites', { headers: { Authorization: `Bearer ${key}` } })
+      const res = await fetch(`${API_BASE}/sites`, { headers: { Authorization: `Bearer ${key}` } })
       if (res.status === 401 || res.status === 403) {
         setError('Sign-in failed — your account could not be verified.')
         setLoading(false)

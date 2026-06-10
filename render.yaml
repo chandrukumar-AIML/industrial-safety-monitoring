@@ -1,0 +1,74 @@
+# render.yaml — Render Blueprint for SafeGuardAI
+# Deploy: push to GitHub → Render Dashboard → New → Blueprint → pick this repo.
+#
+# Provisions the FastAPI backend (Docker) + the React frontend (static site),
+# both on the free tier.
+#
+# DB choice: SQLite (ephemeral) + DEMO_MODE auto-seed. This is exactly what the
+# 116-test suite runs on, so there is zero database-dialect risk. The synthetic
+# demo data re-seeds automatically on every boot, so the demo always has data.
+# (For a persistent production tenant, swap DATABASE_URL to a managed Postgres
+# and run `python scripts/demo_seed.py --reset` once — but validate dialect first.)
+#
+# SECURITY: API_KEY below is the *demo* key (already public in the frontend
+# source for the one-click demo). For a real tenant, replace API_KEY here AND
+# VITE_API_KEY / VITE_DEMO_API_KEY in the frontend with a fresh secret.
+
+services:
+  # ── Backend API (FastAPI, Docker) ────────────────────────────
+  - type: web
+    name: safeguardai-backend
+    runtime: docker
+    plan: free
+    dockerfilePath: ./docker/Dockerfile.backend
+    dockerContext: .
+    # /health/live is always 200 when the process is up. Do NOT use /health
+    # (it returns 503 without a camera/pipeline — the normal cloud state).
+    healthCheckPath: /health/live
+    envVars:
+      # SQLite on the container's writable working dir — re-seeded each boot.
+      - key: DATABASE_URL
+        value: "sqlite+aiosqlite:///./safety_monitor.db"
+      # Demo key — MUST match the frontend's VITE_API_KEY below.
+      - key: API_KEY
+        value: "05ac3ecf4b9d6e8fc0a7f353d0d5023d83aa8b40bf4fb2ff277ab3f1eed5802a"
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DEMO_MODE
+        value: "true"            # auto-seeds synthetic data on first boot
+      - key: APP_ENV
+        value: "production"
+      - key: ENVIRONMENT
+        value: "production"
+      - key: DEVICE
+        value: "cpu"
+      - key: VIDEO_SOURCE
+        value: "data/test_video.mp4"   # no webcam in the cloud (pipeline idles)
+      - key: LOG_LEVEL
+        value: "INFO"
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      # After the frontend deploys, confirm this matches its URL (CORS).
+      - key: CORS_ORIGINS
+        value: "https://safeguardai-frontend.onrender.com"
+
+  # ── Frontend (React static site) ─────────────────────────────
+  - type: web
+    name: safeguardai-frontend
+    runtime: static
+    buildCommand: cd frontend && npm ci && npm run build
+    staticPublishPath: frontend/dist
+    envVars:
+      # Point the SPA at the backend service URL.
+      - key: VITE_API_URL
+        value: "https://safeguardai-backend.onrender.com"
+      # Must equal the backend API_KEY above.
+      - key: VITE_API_KEY
+        value: "05ac3ecf4b9d6e8fc0a7f353d0d5023d83aa8b40bf4fb2ff277ab3f1eed5802a"
+      - key: VITE_DEMO_API_KEY
+        value: "05ac3ecf4b9d6e8fc0a7f353d0d5023d83aa8b40bf4fb2ff277ab3f1eed5802a"
+    routes:
+      # SPA fallback — every path serves index.html so client routing works.
+      - type: rewrite
+        source: /*
+        destination: /index.html

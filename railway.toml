@@ -18,7 +18,9 @@ dockerfilePath = "docker/Dockerfile.backend"
 # CHANGED: single-line command — multi-line TOML heredoc strings may
 # not produce valid shell line continuations on Railway's runner.
 startCommand            = "uvicorn backend.main:app --host 0.0.0.0 --port $PORT --workers 1 --log-level info"
-healthcheckPath         = "/health"
+# Use /health/live (always 200 when process up). /health returns 503 without a
+# camera/pipeline — the normal cloud state — so it must not gate the deploy.
+healthcheckPath         = "/health/live"
 healthcheckTimeout      = 30
 restartPolicyType       = "ON_FAILURE"
 restartPolicyMaxRetries = 5
@@ -38,7 +40,7 @@ PYTHONUNBUFFERED     = "1"
 # Railway containers have no webcam. cv2.VideoCapture(0) returns empty frames
 # and the pipeline exits immediately. Set to an RTSP URL or a bundled test clip.
 # Override via: railway variables set --service backend VIDEO_SOURCE=rtsp://...
-VIDEO_SOURCE         = "data/sample.mp4"
+VIDEO_SOURCE         = "data/test_video.mp4"
 
 # FIXED: CORS_ORIGINS was absent — code defaults to http://localhost:5173.
 # Every API call from the Railway frontend URL was blocked with CORS 403.

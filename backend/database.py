@@ -344,6 +344,8 @@ async def init_db(eng: Optional[AsyncEngine] = None) -> None:
                     severity       VARCHAR(16) DEFAULT 'MEDIUM',
                     confidence     FLOAT DEFAULT 0.0,
                     zone_id        VARCHAR(64),
+                    camera_id      VARCHAR(64),
+                    duration_s     FLOAT DEFAULT 0.0,
                     landmark_data  TEXT,
                     combined_alert BOOLEAN DEFAULT 0,
                     frame_idx      INTEGER DEFAULT 0,
@@ -363,6 +365,7 @@ async def init_db(eng: Optional[AsyncEngine] = None) -> None:
                     zone_id          VARCHAR(64),
                     camera_id        VARCHAR(64),
                     frame_idx        INTEGER DEFAULT 0,
+                    acknowledged     BOOLEAN DEFAULT 0,
                     timestamp        DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
             """))
@@ -380,6 +383,7 @@ async def init_db(eng: Optional[AsyncEngine] = None) -> None:
                     bbox_y2        FLOAT,
                     frame_idx      INTEGER DEFAULT 0,
                     alert_sent     BOOLEAN DEFAULT 0,
+                    acknowledged   BOOLEAN DEFAULT 0,
                     timestamp      DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
             """))
@@ -496,6 +500,116 @@ async def init_db(eng: Optional[AsyncEngine] = None) -> None:
                     current_period_end      DATETIME,
                     cancelled_at            DATETIME,
                     created_at              DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """))
+
+            # ── Tables previously created lazily by route handlers ──
+            # Without these at startup, a fresh deploy (e.g. Render) is missing
+            # them until the first relevant API call — and demo auto-seed fails.
+            await conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS alert_recipients (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name            VARCHAR(128) NOT NULL,
+                    role            VARCHAR(64),
+                    email           VARCHAR(256),
+                    whatsapp_number VARCHAR(32),
+                    notify_critical BOOLEAN DEFAULT 1,
+                    notify_high     BOOLEAN DEFAULT 1,
+                    notify_medium   BOOLEAN DEFAULT 0,
+                    notify_low      BOOLEAN DEFAULT 0,
+                    zone_filter     TEXT,
+                    active          BOOLEAN DEFAULT 1,
+                    created_at      DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """))
+            await conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS alert_send_log (
+                    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                    recipient_id INTEGER,
+                    violation_id INTEGER,
+                    alert_type   VARCHAR(32),
+                    zone_id      VARCHAR(64),
+                    track_id     INTEGER,
+                    severity     VARCHAR(16),
+                    channel      VARCHAR(32),
+                    status       VARCHAR(16) DEFAULT 'sent',
+                    error_msg    TEXT,
+                    sent_at      DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """))
+            await conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS zone_alerts (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    zone_id         VARCHAR(64),
+                    zone_name       VARCHAR(128),
+                    alert_type      VARCHAR(64),
+                    message         TEXT,
+                    severity        VARCHAR(16) DEFAULT 'HIGH',
+                    acknowledged    BOOLEAN DEFAULT 0,
+                    acknowledged_by VARCHAR(64),
+                    acknowledged_at DATETIME,
+                    created_at      DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """))
+            await conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS drift_results (
+                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    model_version VARCHAR(64),
+                    drift_type    VARCHAR(32),
+                    drift_score   FLOAT,
+                    threshold     FLOAT DEFAULT 0.1,
+                    is_drift      BOOLEAN DEFAULT 0,
+                    details       TEXT,
+                    recorded_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """))
+            await conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS canary_metrics (
+                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    deployment_id INTEGER,
+                    metric_name   VARCHAR(64),
+                    metric_value  FLOAT,
+                    recorded_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """))
+            await conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS inference_stats_daily (
+                    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                    date             VARCHAR(12),
+                    total_frames     INTEGER DEFAULT 0,
+                    total_detections INTEGER DEFAULT 0,
+                    avg_fps          FLOAT,
+                    avg_confidence   FLOAT,
+                    model_version    VARCHAR(64)
+                )
+            """))
+            await conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS worker_audit_log (
+                    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+                    worker_id VARCHAR(64),
+                    action    VARCHAR(64),
+                    actor     VARCHAR(64),
+                    details   TEXT,
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """))
+            await conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS worker_compliance (
+                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    worker_id     VARCHAR(64),
+                    date          VARCHAR(12),
+                    ppe_score     FLOAT,
+                    total_checks  INTEGER DEFAULT 0,
+                    passed_checks INTEGER DEFAULT 0
+                )
+            """))
+            await conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS worker_risk_history (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    worker_id   VARCHAR(64),
+                    risk_score  FLOAT,
+                    risk_level  VARCHAR(16),
+                    recorded_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
             """))
 
