@@ -6,13 +6,16 @@
  */
 
 import { useQuery } from '@tanstack/react-query'
-
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+import { api } from '../api/client'
 
 async function fetchDemoStatus() {
-  const res = await fetch(`${API_BASE}/demo/status`)
-  if (!res.ok) return { demo_mode: false }
-  return res.json()
+  // Use the authenticated client (raw fetch has no auth → 401 in production).
+  try {
+    const res = await api.get('/demo/status')
+    return res.data
+  } catch {
+    return { demo_mode: false }
+  }
 }
 
 export default function DemoBanner() {

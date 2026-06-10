@@ -10,14 +10,14 @@
  * fetched once and shared across the tree.
  */
 import { useQuery } from '@tanstack/react-query'
-
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+import { api } from '../api/client'
 
 async function fetchDemoStatus() {
+  // Use the shared axios client so the Authorization header is attached.
+  // (A raw fetch has no auth → 401 in production → demo mode wrongly reads OFF.)
   try {
-    const res = await fetch(`${API_BASE}/demo/status`)
-    if (!res.ok) return { demo_mode: false }
-    return res.json()
+    const res = await api.get('/demo/status')
+    return res.data
   } catch {
     return { demo_mode: false }
   }
