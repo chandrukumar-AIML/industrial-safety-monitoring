@@ -109,6 +109,12 @@ async def api_key_middleware(request: Request, call_next) -> JSONResponse:
     if not API_KEY:
         return await call_next(request)
 
+    # CORS preflight: browsers send an unauthenticated OPTIONS request before the
+    # real call. It must pass through so the CORS middleware can answer it —
+    # blocking it with 401 makes the browser abort the actual request.
+    if request.method == "OPTIONS":
+        return await call_next(request)
+
     # Skip auth for public endpoints (health probes, docs, websocket stream)
     if (
         request.url.path in _AUTH_EXCLUDED_PATHS
