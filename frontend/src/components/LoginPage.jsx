@@ -73,6 +73,9 @@ export default function LoginPage({ onLogin }) {
   const handleDemo = () => {
     setLoading(true)
     setError('')
+    // User explicitly chose the demo — don't ask again via the onboarding
+    // wizard's "Use Demo Mode?" step inside the app.
+    try { localStorage.setItem('sm_onboarding_done', '1') } catch { /* ignore */ }
     completeLogin(DEMO_KEY, 'org-steel-india')
   }
 

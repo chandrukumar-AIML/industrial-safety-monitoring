@@ -17,7 +17,7 @@ const STORAGE_KEY = 'sm_onboarding_done'
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
 const STEPS = [
-  { id: 'welcome',  title: 'Welcome to Safety Monitor 🛡️',  icon: '👋' },
+  { id: 'welcome',  title: 'Welcome to SafeGuardAI 🛡️',  icon: '👋' },
   { id: 'camera',   title: 'Connect Your First Camera',       icon: '📷' },
   { id: 'alerts',   title: 'Set Up Alert Destinations',       icon: '🔔' },
   { id: 'done',     title: "You're Ready!",                   icon: '🎉' },
@@ -79,7 +79,7 @@ export default function OnboardingWizard() {
           {step === 0 && (
             <div className="space-y-4">
               <p className="text-slate-400 text-sm leading-relaxed">
-                Industrial Safety Monitor uses AI to detect PPE violations, fire hazards, and worker risks in real time.
+                SafeGuardAI uses AI to detect PPE violations, fire hazards, and worker risks in real time.
                 Let's get you set up in under 2 minutes.
               </p>
               <div className="bg-amber-900/20 border border-amber-700/40 rounded-lg p-3 text-left">
