@@ -491,7 +491,7 @@ function DashboardShell() {
 
 // ── Routes ───────────────────────────────────────────────────
 function AppRoutes() {
-  const { login } = useAuth()
+  const { login, isAuthenticated } = useAuth()
   return (
     <Suspense fallback={
       <div className="min-h-screen bg-surface flex items-center justify-center">
@@ -500,7 +500,9 @@ function AppRoutes() {
     }>
       <Routes>
         <Route path="/" element={<LandingPage />} />
-        <Route path="/login" element={<LoginPage onLogin={login} />} />
+        <Route path="/login" element={
+          isAuthenticated ? <Navigate to="/app" replace /> : <LoginPage onLogin={login} />
+        } />
         <Route path="/app/*" element={
           <RequireAuth><DashboardShell /></RequireAuth>
         } />
