@@ -43,7 +43,7 @@ const WS_BASE_URL = import.meta.env.VITE_WS_URL || null
 const API_KEY = import.meta.env.VITE_API_KEY
   || import.meta.env.VITE_DEMO_API_KEY
   || '05ac3ecf4b9d6e8fc0a7f353d0d5023d83aa8b40bf4fb2ff277ab3f1eed5802a'
-const REQUEST_TIMEOUT = parseInt(import.meta.env.VITE_REQUEST_TIMEOUT || '10000', 10)
+const REQUEST_TIMEOUT = parseInt(import.meta.env.VITE_REQUEST_TIMEOUT || '30000', 10)
 const WS_PING_INTERVAL = parseInt(import.meta.env.VITE_WS_PING_INTERVAL || '20000', 10)
 
 // Security: Only allow HTTPS/WSS in production
