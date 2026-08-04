@@ -51,7 +51,9 @@ export default function LoginPage({ onLogin }) {
       }
       if (org) localStorage.setItem('active_org_id', org)
       onLogin?.(key)
-      navigate('/app')
+      // Defer navigation one tick so React can commit the auth state update
+      // before RequireAuth renders and checks isAuthenticated.
+      setTimeout(() => navigate('/app'), 0)
     } catch {
       setError("Can't reach the server right now. Please try again in a moment.")
       setLoading(false)
