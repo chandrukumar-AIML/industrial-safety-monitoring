@@ -64,8 +64,10 @@ async def list_reports(
 ) -> list:
     result = await session.execute(
         text("""
-            SELECT id, report_date, week_start, week_end,
-                   COALESCE(site_score, compliance_score, 0.0) AS site_score,
+            SELECT id, report_date,
+                   date(report_date, '-7 days') AS week_start,
+                   date(report_date)            AS week_end,
+                   COALESCE(site_score, 0.0)   AS site_score,
                    NULL AS prev_week_score,
                    NULL AS score_delta,
                    total_violations,
