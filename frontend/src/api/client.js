@@ -68,8 +68,6 @@ export const api = axios.create({
   timeout: REQUEST_TIMEOUT,
   headers: {
     'Content-Type': 'application/json',
-    // Security: Prevent MIME type sniffing
-    'X-Content-Type-Options': 'nosniff',
   },
 })
 
