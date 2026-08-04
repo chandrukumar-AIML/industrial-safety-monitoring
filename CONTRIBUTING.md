@@ -32,8 +32,8 @@ make a change, and open a pull request.
 ### Clone & Install
 
 ```bash
-git clone https://github.com/chandrukumar/industrial-safety-monitoring
-cd industrial-safety-monitoring
+git clone https://github.com/chandrukumar-AIML/chandru-stack.git
+cd chandru-stack
 
 # Backend
 python -m venv .venv
@@ -271,5 +271,5 @@ PRs that fail CI (ruff, mypy, pytest) will not be merged.
 
 ## 🙋 Questions?
 
-Open a [Discussion](https://github.com/chandrukumar/industrial-safety-monitoring/discussions)
+Open a [Discussion](https://github.com/chandrukumar-AIML/chandru-stack/discussions)
 or email: kumarchandru646@gmail.com

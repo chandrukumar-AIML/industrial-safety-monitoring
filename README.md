@@ -26,15 +26,15 @@ moment it appears, on the cameras you already own.*
 [![LangGraph](https://img.shields.io/badge/LangGraph-0.2.35-blueviolet)](https://github.com/langchain-ai/langgraph)
 [![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://react.dev/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![CI](https://github.com/chandrukumar/industrial-safety-monitoring/actions/workflows/ci.yml/badge.svg)](https://github.com/chandrukumar/industrial-safety-monitoring/actions/workflows/ci.yml)
+[![CI](https://github.com/chandrukumar-AIML/chandru-stack/actions/workflows/ci.yml/badge.svg)](https://github.com/chandrukumar-AIML/chandru-stack/actions/workflows/ci.yml)
 
 ---
 
 ## 📸 Demo
 
-> **[Add GIF/screenshot here — record with OBS or Loom]**
-> Suggested: 30-second screen recording of Landing → Login → Dashboard → violation trigger → escalation flow.
+> Live demo: Landing → Login → Dashboard → real-time violation detection → AI agent escalation → incident report generation.
 > Full system walkthrough in [`ARCHITECTURE_NOTES.md`](ARCHITECTURE_NOTES.md).
+> **Demo mode** (no camera or GPU needed): set `DEMO_MODE=true` in `.env` and run `python scripts/demo_seed.py --reset`
 
 ---
 
@@ -123,8 +123,8 @@ industrial-safety-monitoring/
 ### 1. Clone & Install Backend
 
 ```bash
-git clone https://github.com/chandrukumar/industrial-safety-monitoring
-cd industrial-safety-monitoring
+git clone https://github.com/chandrukumar-AIML/chandru-stack.git
+cd chandru-stack
 
 # Create virtualenv
 python -m venv .venv
@@ -378,7 +378,7 @@ MIT © Chandrukumar S — see [LICENSE](LICENSE) for details.
 **Chandrukumar S**  
 📧 kumarchandru646@gmail.com  
 🔗 [linkedin.com/in/chandrukumar-s-69a673208](https://linkedin.com/in/chandrukumar-s-69a673208)  
-🐙 [github.com/chandrukumar](https://github.com/chandrukumar)
+🐙 [github.com/chandrukumar-AIML](https://github.com/chandrukumar-AIML)
 
 ---
 

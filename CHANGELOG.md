@@ -137,7 +137,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
-[Unreleased]: https://github.com/chandrukumar/industrial-safety-monitoring/compare/v1.2.0...HEAD
-[1.2.0]: https://github.com/chandrukumar/industrial-safety-monitoring/compare/v1.1.0...v1.2.0
-[1.1.0]: https://github.com/chandrukumar/industrial-safety-monitoring/compare/v1.0.0...v1.1.0
-[1.0.0]: https://github.com/chandrukumar/industrial-safety-monitoring/releases/tag/v1.0.0
+[Unreleased]: https://github.com/chandrukumar-AIML/chandru-stack/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/chandrukumar-AIML/chandru-stack/compare/v1.1.0...v1.2.0
+[1.1.0]: https://github.com/chandrukumar-AIML/chandru-stack/compare/v1.0.0...v1.1.0
+[1.0.0]: https://github.com/chandrukumar-AIML/chandru-stack/releases/tag/v1.0.0
