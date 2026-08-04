@@ -72,3 +72,8 @@ tf-keras==2.16.0
 httpx==0.27.2                # async HTTP for Groq, OpenRouter, OpenAI calls
 # Optional: pip install razorpay  (only needed for billing/Razorpay)
 # Optional: pip install groq      (not required — uses raw httpx)
+
+# ── Auth (JWT + password hashing) ─────────────────────────
+python-jose[cryptography]==3.3.0   # JWT creation / verification
+passlib[bcrypt]==1.7.4             # bcrypt password hashing
+email-validator==2.1.1             # email format validation for Pydantic

@@ -37,12 +37,6 @@ validateEnv()
 // ── Configuration ─────────────────────────────────────────────
 const BASE_URL = import.meta.env.VITE_API_URL || ''
 const WS_BASE_URL = import.meta.env.VITE_WS_URL || null
-// Fall back to the demo key so a demo deploy authenticates even if VITE_API_KEY
-// wasn't set in the host (Vercel/Render). A real prod key, when set, takes
-// precedence. This is the demo key already public in the login screen.
-const API_KEY = import.meta.env.VITE_API_KEY
-  || import.meta.env.VITE_DEMO_API_KEY
-  || '05ac3ecf4b9d6e8fc0a7f353d0d5023d83aa8b40bf4fb2ff277ab3f1eed5802a'
 // Hardcoded to 60s — Render free-tier cold-start can take 30-60s.
 // Not configurable via env to prevent accidental override to a short value.
 const REQUEST_TIMEOUT = 60000
@@ -73,11 +67,14 @@ export const api = axios.create({
   },
 })
 
-// Request interceptor: Attach auth header if API key exists
+// Request interceptor: Attach JWT from sessionStorage as Bearer token
 api.interceptors.request.use(
   (config) => {
-    if (API_KEY && !config.headers.Authorization) {
-      config.headers.Authorization = `Bearer ${API_KEY}`
+    if (!config.headers.Authorization) {
+      try {
+        const token = sessionStorage.getItem('safety_monitor_api_key')
+        if (token) config.headers.Authorization = `Bearer ${token}`
+      } catch { /* sessionStorage unavailable (e.g. private browsing restriction) */ }
     }
     return config
   },
@@ -483,7 +480,6 @@ export const formatViolationClass = (className) => {
 export const config = {
   baseUrl: BASE_URL,
   wsUrl: WS_BASE_URL,
-  apiKeySet: !!API_KEY,
   isProduction,
   requireSecure,
 }

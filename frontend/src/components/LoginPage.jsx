@@ -1,36 +1,7 @@
-/**
- * LoginPage.jsx
- * Client-facing sign-in — email + password (admin / manager accounts).
- *
- * Note on auth: the backend currently uses API-key auth (no user table yet —
- * per-user JWT accounts are the documented v2 backend item in ARCHITECTURE_NOTES).
- * For the demo, known accounts map to the backend API key under the hood, so the
- * client-facing experience is a normal email/password login. The raw API key is
- * surfaced in Settings → API Access for programmatic integrations.
- */
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
-// API base — '/api' (Vite proxy) in dev, the backend URL in production.
-const API_BASE = import.meta.env.VITE_API_URL || '/api'
-
-// Demo API key (the backend's dev key — used to authenticate demo accounts).
-// In production, VITE_DEMO_API_KEY overrides this to match the deployed backend.
-const DEMO_KEY = import.meta.env.VITE_DEMO_API_KEY
-  || import.meta.env.VITE_API_KEY
-  || '05ac3ecf4b9d6e8fc0a7f353d0d5023d83aa8b40bf4fb2ff277ab3f1eed5802a'
-
-// Demo accounts → resolve to the backend API key. Replace with real JWT auth in prod.
-const DEMO_ACCOUNTS = {
-  'admin@safeguardai.io': {
-    password: 'safeguard123', role: 'Administrator',
-    key: DEMO_KEY, org: 'org-steel-india',
-  },
-  'manager@safeguardai.io': {
-    password: 'safeguard123', role: 'Safety Manager',
-    key: DEMO_KEY, org: 'org-steel-india',
-  },
-}
+const API_BASE = import.meta.env.VITE_API_URL || ''
 
 export default function LoginPage({ onLogin }) {
   const navigate = useNavigate()
@@ -40,44 +11,28 @@ export default function LoginPage({ onLogin }) {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
-  const completeLogin = async (key, org) => {
-    // Confirm the key actually works against the backend before entering the app.
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    setError('')
+    setLoading(true)
     try {
-      const res = await fetch(`${API_BASE}/sites`, { headers: { Authorization: `Bearer ${key}` } })
-      if (res.status === 401 || res.status === 403) {
-        setError('Sign-in failed — your account could not be verified.')
+      const res = await fetch(`${API_BASE}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim().toLowerCase(), password }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setError(data.detail || 'Sign-in failed. Check your credentials.')
         setLoading(false)
         return
       }
-      if (org) localStorage.setItem('active_org_id', org)
-      onLogin?.(key)
-      // Navigation is handled by the /login route guard in AppRoutes:
-      // isAuthenticated=true → <Navigate to="/app" replace />
+      if (data.org_id) localStorage.setItem('active_org_id', data.org_id)
+      onLogin?.(data.access_token)
     } catch {
       setError("Can't reach the server right now. Please try again in a moment.")
       setLoading(false)
     }
-  }
-
-  const handleSubmit = (e) => {
-    e.preventDefault()
-    setError('')
-    const acct = DEMO_ACCOUNTS[email.trim().toLowerCase()]
-    if (!acct || acct.password !== password) {
-      setError('Wrong email or password. Try again.')
-      return
-    }
-    setLoading(true)
-    completeLogin(acct.key, acct.org)
-  }
-
-  const handleDemo = () => {
-    setLoading(true)
-    setError('')
-    // User explicitly chose the demo — don't ask again via the onboarding
-    // wizard's "Use Demo Mode?" step inside the app.
-    try { localStorage.setItem('sm_onboarding_done', '1') } catch { /* ignore */ }
-    completeLogin(DEMO_KEY, 'org-steel-india')
   }
 
   const valid = email.trim() && password
@@ -123,30 +78,6 @@ export default function LoginPage({ onLogin }) {
           <h2 className="text-2xl font-bold mb-1">Welcome back</h2>
           <p className="text-slate-400 text-sm mb-6">Sign in to your safety dashboard</p>
 
-          {/* Demo access — single, one-click entry */}
-          <div className="bg-brand-500/8 border border-brand-500/25 rounded-xl p-4 mb-5">
-            <div className="flex items-center gap-2 mb-2">
-              <span className="text-brand-400 font-semibold text-sm">🎭 Just exploring?</span>
-            </div>
-            <p className="text-slate-400 text-xs mb-3">
-              Jump straight into a fully-loaded demo — no signup, sample data across 8 industries.
-            </p>
-            <button
-              type="button"
-              onClick={handleDemo}
-              disabled={loading}
-              className="w-full bg-brand-gradient text-slate-900 font-bold py-2.5 rounded-lg hover:shadow-lg hover:shadow-brand-500/30 transition-all disabled:opacity-60"
-            >
-              {loading ? 'Loading demo…' : 'Launch Demo →'}
-            </button>
-          </div>
-
-          <div className="flex items-center gap-3 mb-5">
-            <div className="flex-1 h-px bg-surface-border" />
-            <span className="text-slate-600 text-xs">or sign in with your account</span>
-            <div className="flex-1 h-px bg-surface-border" />
-          </div>
-
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label htmlFor="email" className="block text-sm text-slate-400 mb-1.5">Email</label>
@@ -186,7 +117,7 @@ export default function LoginPage({ onLogin }) {
             <div className="flex justify-end">
               <button
                 type="button"
-                onClick={() => setError('Password resets are handled by your organization admin. Contact admin@safeguardai.io.')}
+                onClick={() => setError('Password resets are handled by your organization admin.')}
                 className="text-xs text-slate-500 hover:text-brand-400 transition-colors"
               >
                 Forgot password?
@@ -202,7 +133,7 @@ export default function LoginPage({ onLogin }) {
             <button
               type="submit"
               disabled={loading || !valid}
-              className="w-full bg-surface-raised border border-surface-border text-slate-200 font-semibold py-3 rounded-xl hover:bg-surface-high hover:border-brand-500/40 transition-all disabled:opacity-50"
+              className="w-full bg-brand-gradient text-slate-900 font-bold py-3 rounded-xl hover:shadow-lg hover:shadow-brand-500/30 transition-all disabled:opacity-50"
             >
               {loading ? 'Signing in…' : 'Sign In'}
             </button>

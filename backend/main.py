@@ -93,41 +93,47 @@ if API_KEY and len(API_KEY) < 16:
     logger.warning("API_KEY is too short (<16 chars) — consider using a stronger key")
 
 
-# ── Optional API key middleware ───────────────────────────────
-_AUTH_EXCLUDED_PATHS = {"/health", "/docs", "/openapi.json", "/redoc", "/stream"}
+# ── Optional API key + JWT middleware ────────────────────────
+_AUTH_EXCLUDED_PATHS = {
+    "/health", "/docs", "/openapi.json", "/redoc", "/stream",
+    "/auth/login", "/auth/register",
+}
 
 
 async def api_key_middleware(request: Request, call_next) -> JSONResponse:
     """
-    Simple Bearer token auth middleware.
-    Disabled when API_KEY env var is empty (local dev).
-    
-    # FIXED: Returns JSONResponse directly instead of raising HTTPException
-    # FIXED: Masks API key in logs
-    # IMPROVED: Clear error messages for debugging
+    Bearer token auth middleware.
+    Accepts EITHER:
+      - A JWT issued by POST /auth/login
+      - A static API_KEY (legacy / machine-to-machine)
+    Disabled when both JWT_SECRET is default AND API_KEY is empty (local dev).
     """
-    if not API_KEY:
-        return await call_next(request)
+    from .auth.jwt_utils import decode_access_token, JWT_SECRET
 
-    # CORS preflight: browsers send an unauthenticated OPTIONS request before the
-    # real call. It must pass through so the CORS middleware can answer it —
-    # blocking it with 401 makes the browser abort the actual request.
+    # CORS preflight must always pass through
     if request.method == "OPTIONS":
         return await call_next(request)
 
-    # Skip auth for public endpoints (health probes, docs, websocket stream)
+    # Public endpoints (health, docs, auth, websocket)
+    path = request.url.path
     if (
-        request.url.path in _AUTH_EXCLUDED_PATHS
-        or request.url.path.startswith("/stream")
-        or request.url.path.startswith("/health")
+        path in _AUTH_EXCLUDED_PATHS
+        or path.startswith("/stream")
+        or path.startswith("/health")
+        or path.startswith("/auth/")
     ):
+        return await call_next(request)
+
+    # If no auth is configured at all (pure local dev), let everything through
+    no_jwt_configured = JWT_SECRET == "CHANGE_ME_IN_PRODUCTION_use_openssl_rand_hex_32"
+    if not API_KEY and no_jwt_configured:
         return await call_next(request)
 
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
         logger.warning(
             "Auth rejected (missing header) | path={} | ip={}",
-            request.url.path,
+            path,
             request.client.host if request.client else "unknown",
         )
         return JSONResponse(
@@ -135,23 +141,28 @@ async def api_key_middleware(request: Request, call_next) -> JSONResponse:
             content={"detail": "Missing Authorization: Bearer <token> header"},
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
+
     token = auth_header.removeprefix("Bearer ").strip()
-    if token != API_KEY:
-        # Log masked key for debugging
-        masked_key = API_KEY[:4] + "***" + API_KEY[-4:] if len(API_KEY) > 8 else "***"
-        logger.warning(
-            "Auth rejected (invalid token) | path={} | ip={} | token={}",
-            request.url.path,
-            request.client.host if request.client else "unknown",
-            masked_key,
-        )
-        return JSONResponse(
-            status_code=status.HTTP_403_FORBIDDEN,
-            content={"detail": "Invalid API key"},
-        )
-    
-    return await call_next(request)
+
+    # Try JWT first
+    token_data = decode_access_token(token)
+    if token_data:
+        request.state.user = token_data
+        return await call_next(request)
+
+    # Fall back to static API key
+    if API_KEY and token == API_KEY:
+        return await call_next(request)
+
+    logger.warning(
+        "Auth rejected (invalid token) | path={} | ip={}",
+        path,
+        request.client.host if request.client else "unknown",
+    )
+    return JSONResponse(
+        status_code=status.HTTP_403_FORBIDDEN,
+        content={"detail": "Invalid or expired token"},
+    )
 
 
 # ── Lifespan ──────────────────────────────────────────────────
@@ -437,6 +448,9 @@ def create_app() -> FastAPI:
     app.include_router(escalation_router)
     app.include_router(permit_router)
     app.include_router(attendance_router)
+    # Auth router (JWT login / register / me)
+    from .routes.auth_route import router as auth_router
+    app.include_router(auth_router)
 
     return app
 

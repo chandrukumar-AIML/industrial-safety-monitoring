@@ -32,12 +32,10 @@ const WorkerProfilePage = lazy(() => import('./components/WorkerProfilePage'))
 const ZoneAlertBanner = lazy(() => import('./components/ZoneAlertBanner'))
 const ZoneDrawer = lazy(() => import('./components/ZoneDrawer'))
 // New feature components
-const DemoBanner = lazy(() => import('./components/DemoBanner'))
 const DarkModeToggle = lazy(() => import('./components/DarkModeToggle'))
 const ExportButton = lazy(() => import('./components/ExportButton'))
 const WebhookConfigPanel = lazy(() => import('./components/WebhookConfigPanel'))
 const CameraConfigPanel = lazy(() => import('./components/CameraConfigPanel'))
-const OnboardingWizard = lazy(() => import('./components/OnboardingWizard'))
 const AuditLogPanel = lazy(() => import('./components/AuditLogPanel'))
 // Enterprise SaaS panels
 const EscalationPanel = lazy(() => import('./components/EscalationPanel'))
@@ -160,16 +158,6 @@ function DashboardShell() {
 
   return (
           <div className="min-h-screen bg-surface text-slate-100 flex flex-col">
-
-            {/* Onboarding wizard (first-time only) */}
-            <Suspense fallback={null}>
-              <OnboardingWizard />
-            </Suspense>
-
-            {/* Demo mode banner */}
-            <Suspense fallback={null}>
-              <DemoBanner />
-            </Suspense>
 
             {/* Global status bar */}
             <StatusBar
