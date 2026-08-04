@@ -9,6 +9,7 @@
  * surfaced in Settings → API Access for programmatic integrations.
  */
 import { useState } from 'react'
+import { flushSync } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 
 // API base — '/api' (Vite proxy) in dev, the backend URL in production.
@@ -50,10 +51,10 @@ export default function LoginPage({ onLogin }) {
         return
       }
       if (org) localStorage.setItem('active_org_id', org)
-      onLogin?.(key)
-      // Defer navigation one tick so React can commit the auth state update
-      // before RequireAuth renders and checks isAuthenticated.
-      setTimeout(() => navigate('/app'), 0)
+      // flushSync forces React to commit setIsAuthenticated(true) synchronously
+      // so RequireAuth sees isAuthenticated=true when navigate('/app') renders.
+      flushSync(() => onLogin?.(key))
+      navigate('/app')
     } catch {
       setError("Can't reach the server right now. Please try again in a moment.")
       setLoading(false)
