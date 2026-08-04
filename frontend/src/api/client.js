@@ -77,10 +77,6 @@ api.interceptors.request.use(
     if (API_KEY && !config.headers.Authorization) {
       config.headers.Authorization = `Bearer ${API_KEY}`
     }
-    // Security: Prevent caching of sensitive endpoints
-    if (config.url?.includes('/agent/') || config.url?.includes('/reports/')) {
-      config.headers['Cache-Control'] = 'no-store'
-    }
     return config
   },
   (error) => Promise.reject(error)

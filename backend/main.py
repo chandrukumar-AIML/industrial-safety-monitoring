@@ -373,7 +373,7 @@ def create_app() -> FastAPI:
         allow_origin_regex=r"https://.*\.(vercel\.app|onrender\.com)",
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type", "X-API-Key", "X-Org-ID"],
+        allow_headers=["Authorization", "Content-Type", "X-API-Key", "X-Org-ID", "Cache-Control"],
     )
 
     # Multi-tenant middleware — resolves X-Org-ID → request.state.org_id
