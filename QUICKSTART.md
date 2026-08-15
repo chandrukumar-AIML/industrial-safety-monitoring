@@ -8,8 +8,8 @@ AI-powered real-time PPE detection, fire alerts, autonomous incident reporting, 
 
 ```bash
 # 1. Clone
-git clone https://github.com/chandrukumar-AIML/chandru-stack.git
-cd chandru-stack
+git clone https://github.com/chandrukumar-AIML/industrial-safety-monitoring.git
+cd industrial-safety-monitoring
 
 # 2. Configure (generate secrets)
 cp .env.example .env

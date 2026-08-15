@@ -24,9 +24,10 @@ moment it appears, on the cameras you already own.*
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.111-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![YOLOv8](https://img.shields.io/badge/YOLOv8-ultralytics-orange)](https://github.com/ultralytics/ultralytics)
 [![LangGraph](https://img.shields.io/badge/LangGraph-0.2.35-blueviolet)](https://github.com/langchain-ai/langgraph)
-[![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://react.dev/)
+[![React](https://img.shields.io/badge/React-19+TypeScript-61DAFB?logo=react&logoColor=black)](https://react.dev/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.7-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![CI](https://github.com/chandrukumar-AIML/chandru-stack/actions/workflows/ci.yml/badge.svg)](https://github.com/chandrukumar-AIML/chandru-stack/actions/workflows/ci.yml)
+[![CI](https://github.com/chandrukumar-AIML/industrial-safety-monitoring/actions/workflows/ci.yml/badge.svg)](https://github.com/chandrukumar-AIML/industrial-safety-monitoring/actions/workflows/ci.yml)
 
 ---
 
@@ -62,19 +63,63 @@ moment it appears, on the cameras you already own.*
 | Pose Analysis | MediaPipe 0.10 | Body keypoint physical hazard detection |
 | Face Identity | DeepFace 0.0.93 | Worker enrollment & 1:N recognition |
 | AI Agent | LangGraph 0.2.35 | Stateful 8-node autonomous safety workflow |
-| LLM | Ollama / OpenAI (configurable) | Severity scoring & incident narrative generation |
+| LLM | Groq → Gemini → OpenAI → Ollama | Fallback chain — severity scoring & incident narratives |
 | RAG | LangChain 0.2 + ChromaDB 0.5 | Safety document Q&A chatbot |
 | Explainability | SHAP 0.45 | Detection saliency maps |
 | MLOps | MLflow | Model registry + canary deployment traffic splitting |
 | API | FastAPI 0.111 + Pydantic v2 | 39 REST endpoints with OpenAPI docs |
 | ORM | SQLModel + aiosqlite / PostgreSQL | Async database layer |
 | Auth | Bearer token + RBAC | 4 roles: viewer / operator / manager / admin |
-| Frontend | React 19 + Vite 8 | 12-tab responsive dashboard UI |
+| Frontend | React 19 + TypeScript + Vite 8 | 12-tab dashboard, Framer Motion, dark #080808/#6366F1 |
 | Deploy | Docker Compose + Railway | Container + one-click cloud deploy |
 
 ---
 
 ## 🏗️ Architecture
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│  CAMERA FEEDS (RTSP / Webcam)                                    │
+│  cam-001 · cam-002 · cam-003 · cam-004 …                        │
+└────────────────────────┬─────────────────────────────────────────┘
+                         │
+                         ▼
+┌──────────────────────────────────────────────────────────────────┐
+│  INFERENCE PIPELINE (parallel threads)                           │
+│  ┌─────────────┐  ┌──────────────┐  ┌────────────────────────┐  │
+│  │ YOLOv8 PPE  │  │  MediaPipe   │  │   DeepFace Identity    │  │
+│  │ (6 classes) │  │  Pose Hazard │  │  7-day Risk Score      │  │
+│  └──────┬──────┘  └──────┬───────┘  └──────────┬─────────────┘  │
+│         │ ByteTrack       │ Pose alerts          │ Face enroll    │
+└─────────┼─────────────────┼──────────────────────┼───────────────┘
+          │                 │                      │
+          ▼                 │                      │
+┌──────────────────────────────────────────────────────────────────┐
+│  LANGGRAPH 8-NODE AUTONOMOUS AGENT                               │
+│  1.DetectViolation → 2.CheckWorkerHistory → 3.ScoreSeverity     │
+│  → 4.DecideAlertLevel → 5.GenerateReport → 6.SendAlert          │
+│  → 7.LogToDatabase → 8.UpdateComplianceScore                    │
+│                          │                                       │
+│  LLM chain: Groq → Gemini → OpenAI → Ollama → Template         │
+└──────────┬────────────────┼──────────────────────────────────────┘
+           │                │
+           ▼                ▼
+┌──────────────────┐ ┌──────────────────────────────────────────┐
+│  FASTAPI BACKEND │ │  ALERTS (multi-channel)                  │
+│  39 endpoints    │ │  Email · WhatsApp · Slack · JIRA webhook │
+│  4-role RBAC     │ │  L1→L4 escalation matrix                 │
+│  Pydantic v2     │ │                                          │
+│  ISO 45001 audit │ └──────────────────────────────────────────┘
+│  Razorpay billing│
+└──────────┬───────┘
+           │
+           ▼
+┌──────────────────────────────────────────────────────────────────┐
+│  REACT 19 + TypeScript FRONTEND (dark #080808 / accent #6366F1) │
+│  12-tab dashboard · Framer Motion transitions · WebSocket live  │
+│  Violation log · SHAP explainability · MLOps · Billing panel   │
+└──────────────────────────────────────────────────────────────────┘
+```
 
 ```
 industrial-safety-monitoring/
@@ -123,8 +168,8 @@ industrial-safety-monitoring/
 ### 1. Clone & Install Backend
 
 ```bash
-git clone https://github.com/chandrukumar-AIML/chandru-stack.git
-cd chandru-stack
+git clone https://github.com/chandrukumar-AIML/industrial-safety-monitoring.git
+cd industrial-safety-monitoring
 
 # Create virtualenv
 python -m venv .venv
@@ -143,10 +188,74 @@ cp .env.example .env
 Edit `.env` — minimum required:
 
 ```env
-API_KEY=your-secret-key-here
-DEMO_MODE=true              # true = no camera needed (great for portfolio)
+# ── Required ──────────────────────────────────────────────────────
+DEMO_MODE=true                          # No camera / GPU needed — seeds 22 DB tables
 DATABASE_URL=sqlite+aiosqlite:///./safety_monitor.db
+SECRET_KEY=change-me-in-production      # JWT signing key
+
+# ── Auth ──────────────────────────────────────────────────────────
+ADMIN_API_KEY=admin-secret              # Admin role
+SUPERVISOR_API_KEY=supervisor-secret    # Supervisor role
+WORKER_API_KEY=worker-secret            # Worker role
+VIEWER_API_KEY=viewer-secret            # Read-only viewer role
+RBAC_ENABLED=false                      # Set true in production
+
+# ── LLM: Groq → Gemini → OpenAI → Ollama fallback chain ──────────
+GROQ_API_KEY=                           # Free 14,400 req/day — get at console.groq.com
+GROQ_MODEL=llama-3.1-8b-instant
+GEMINI_API_KEY=                         # Google Gemini — free tier available
+GEMINI_MODEL=gemini-1.5-flash
+OPENAI_API_KEY=                         # Paid — gpt-4o-mini
+OLLAMA_BASE_URL=http://localhost:11434  # Self-hosted fallback
+OLLAMA_MODEL=llama3
+
+# ── Billing: Razorpay (India B2B INR) ────────────────────────────
+RAZORPAY_KEY_ID=                        # From Razorpay dashboard
+RAZORPAY_KEY_SECRET=
+RAZORPAY_PLAN_STARTER_MONTHLY=          # Plan IDs from Razorpay
+RAZORPAY_PLAN_GROWTH_MONTHLY=
+RAZORPAY_PLAN_ENTERPRISE_MONTHLY=
+
+# ── Alerts ────────────────────────────────────────────────────────
+ALERT_EMAIL_FROM=
+SMTP_HOST=
+SMTP_PORT=587
+SMTP_USER=
+SMTP_PASSWORD=
+WHATSAPP_TOKEN=                         # Twilio / Meta WhatsApp
+SLACK_WEBHOOK_URL=
+
+# ── MLOps ────────────────────────────────────────────────────────
+MLFLOW_TRACKING_URI=http://localhost:5000
+
+# ── Optional ─────────────────────────────────────────────────────
+DEMO_WORKERS=12
+DEMO_CAMERAS=4
+DEMO_VIOLATION_RATE=0.3
 ```
+
+### DEMO_MODE — zero external dependencies
+
+```bash
+# 1. Start backend in demo mode
+DEMO_MODE=true python -m uvicorn backend.main:app --port 8000
+
+# 2. Seed all 22 database tables with realistic Indian safety data
+python scripts/demo_seed.py --reset
+
+# 3. Verify all tables are populated
+python scripts/demo_seed.py --check
+
+# 4. Start frontend
+cd frontend && npm run dev
+```
+
+In DEMO_MODE the app:
+- Generates live synthetic violations at configurable rate
+- Answers API calls with realistic Indian factory data (Chennai, Jamshedpur, Jamnagar sites)
+- Requires **zero** camera, GPU, or external API key
+- Uses the template LLM fallback (no Groq/Gemini key needed)
+
 
 ### 3. Run Backend
 
