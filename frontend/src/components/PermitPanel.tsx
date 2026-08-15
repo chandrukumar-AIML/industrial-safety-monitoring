@@ -53,13 +53,13 @@ function RequestForm({ onCreated }) {
   }
 
   return (
-    <div className="bg-gray-800 rounded-xl border border-gray-700 p-4 mb-4">
+    <div className="bg-surface-high rounded-xl border border-surface-border/60 p-4 mb-4">
       <h3 className="text-white font-medium text-sm mb-3">Request New Permit</h3>
       <div className="grid grid-cols-2 gap-2 mb-2">
         <select
           value={form.work_type}
           onChange={e => setForm(f => ({ ...f, work_type: e.target.value }))}
-          className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm col-span-2"
+          className="bg-gray-700 border border-surface-border rounded-lg px-3 py-2 text-white text-sm col-span-2"
         >
           {WORK_TYPES.map(wt => (
             <option key={wt} value={wt}>
@@ -68,13 +68,13 @@ function RequestForm({ onCreated }) {
           ))}
         </select>
         <input
-          className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm"
+          className="bg-gray-700 border border-surface-border rounded-lg px-3 py-2 text-white text-sm"
           placeholder="Worker ID"
           value={form.worker_id}
           onChange={e => setForm(f => ({ ...f, worker_id: e.target.value }))}
         />
         <input
-          className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm"
+          className="bg-gray-700 border border-surface-border rounded-lg px-3 py-2 text-white text-sm"
           placeholder="Zone ID"
           value={form.zone_id}
           onChange={e => setForm(f => ({ ...f, zone_id: e.target.value }))}
@@ -192,7 +192,7 @@ function PermitCard({ permit, onRefresh }) {
       {showApprove && (
         <div className="mt-2 flex gap-2">
           <input
-            className="flex-1 bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-xs"
+            className="flex-1 bg-surface border border-surface-border rounded px-2 py-1 text-white text-xs"
             placeholder="Approver name"
             value={approver}
             onChange={e => setApprover(e.target.value)}
@@ -238,7 +238,7 @@ export default function PermitPanel() {
   }, {})
 
   return (
-    <div className="bg-gray-900 rounded-xl border border-gray-700 p-4 h-full flex flex-col">
+    <div className="bg-surface rounded-xl border border-surface-border/60 p-4 h-full flex flex-col">
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
           <span className="text-xl">📋</span>
@@ -249,7 +249,7 @@ export default function PermitPanel() {
             <button
               key={s}
               onClick={() => setFilter(s)}
-              className={`px-2 py-1 rounded capitalize ${filter === s ? 'bg-orange-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-white'}`}
+              className={`px-2 py-1 rounded capitalize ${filter === s ? 'bg-orange-600 text-white' : 'bg-surface-high text-gray-400 hover:text-white'}`}
             >
               {s} {s !== 'all' && counts[s] ? `(${counts[s]})` : ''}
             </button>

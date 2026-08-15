@@ -21,7 +21,7 @@
   }
   
   body {
-    @apply bg-[#0d1117] text-slate-100;
+    @apply bg-surface text-slate-100;
     /* Prevent zoom on input focus in mobile */
     touch-action: manipulation;
   }

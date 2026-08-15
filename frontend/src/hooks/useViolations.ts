@@ -1,5 +1,5 @@
 /**
- * frontend/src/hooks/useViolations.js
+ * frontend/src/hooks/useViolations.ts
  *
  * React Query hooks for violation data: list, stats, and acknowledgment.
  *

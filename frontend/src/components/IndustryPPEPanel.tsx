@@ -61,23 +61,23 @@ function ComplianceChecker() {
   }
 
   return (
-    <div className="bg-gray-800 rounded-xl border border-gray-700 p-4 mb-4">
+    <div className="bg-surface-high rounded-xl border border-surface-border/60 p-4 mb-4">
       <h3 className="text-white font-medium text-sm mb-3">🔍 Compliance Check</h3>
       <div className="grid grid-cols-3 gap-2 mb-2">
         <input
-          className="bg-gray-700 border border-gray-600 rounded-lg px-2 py-2 text-white text-xs"
+          className="bg-gray-700 border border-surface-border rounded-lg px-2 py-2 text-white text-xs"
           placeholder="Industry"
           value={industry}
           onChange={e => setIndustry(e.target.value)}
         />
         <input
-          className="bg-gray-700 border border-gray-600 rounded-lg px-2 py-2 text-white text-xs"
+          className="bg-gray-700 border border-surface-border rounded-lg px-2 py-2 text-white text-xs"
           placeholder="Zone type"
           value={zone}
           onChange={e => setZone(e.target.value)}
         />
         <input
-          className="bg-gray-700 border border-gray-600 rounded-lg px-2 py-2 text-white text-xs"
+          className="bg-gray-700 border border-surface-border rounded-lg px-2 py-2 text-white text-xs"
           placeholder="PPE class"
           value={ppe}
           onChange={e => setPpe(e.target.value)}
@@ -158,7 +158,7 @@ export default function IndustryPPEPanel() {
   const profiles = selected ? (byIndustry[selected] || []) : []
 
   return (
-    <div className="bg-gray-900 rounded-xl border border-gray-700 p-4 h-full flex flex-col">
+    <div className="bg-surface rounded-xl border border-surface-border/60 p-4 h-full flex flex-col">
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
           <span className="text-xl">🏭</span>
@@ -184,7 +184,7 @@ export default function IndustryPPEPanel() {
             className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
               selected === ind
                 ? 'bg-orange-600 text-white'
-                : 'bg-gray-800 text-gray-400 hover:text-white'
+                : 'bg-surface-high text-gray-400 hover:text-white'
             }`}
           >
             {INDUSTRY_ICONS[ind] || '🏭'} {ind.replace(/_/g, ' ')}
@@ -217,7 +217,7 @@ export default function IndustryPPEPanel() {
               </div>
               <div className="flex flex-wrap gap-1 mb-2">
                 {(p.required_ppe || []).map(ppe => (
-                  <span key={ppe} className="bg-gray-800/60 text-gray-300 text-xs px-2 py-0.5 rounded-full">
+                  <span key={ppe} className="bg-surface-high/60 text-gray-300 text-xs px-2 py-0.5 rounded-full">
                     {PPE_ICONS[ppe] || '🦺'} {ppe}
                   </span>
                 ))}

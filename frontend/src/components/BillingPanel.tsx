@@ -1,24 +1,43 @@
 /**
- * BillingPanel.jsx
+ * BillingPanel.tsx
  *
  * Subscription billing management — plan selection, upgrade, cancel.
- * Razorpay integration (India-first). Shows plan features and pricing.
+ * Razorpay integration (India-first). Shows plan features and pricing in INR.
  */
 import { useState, useEffect } from 'react'
 import { apiClient } from '../api/client'
 import { useToast } from './Toast'
+import type { BillingPlan } from '../types'
 
-const PLAN_COLORS = {
+interface Subscription {
+  plan: string
+  plan_status: 'active' | 'trial' | 'cancelled' | 'past_due'
+  subscription?: {
+    plan: string
+    amount_paise: number
+    billing_cycle: string
+    status: string
+  }
+}
+
+interface PlanCardProps {
+  plan: BillingPlan
+  current: Subscription | null
+  orgId: string
+  onSubscribed: () => void
+}
+
+const PLAN_COLORS: Record<string, { from: string; to: string; accent: string; badge: string }> = {
   starter:    { from: 'from-gray-700', to: 'to-gray-600', accent: 'gray', badge: '🥉' },
   growth:     { from: 'from-blue-800', to: 'to-blue-700', accent: 'blue', badge: '🥈' },
   enterprise: { from: 'from-purple-800', to: 'to-purple-700', accent: 'purple', badge: '🥇' },
 }
 
-function PlanCard({ plan, current, orgId, onSubscribed }) {
+function PlanCard({ plan, current, orgId, onSubscribed }: PlanCardProps) {
   const toast = useToast()
   const [loading, setLoading] = useState(false)
-  const [cycle, setCycle] = useState('monthly')
-  const colors = PLAN_COLORS[plan.plan_id] || PLAN_COLORS.starter
+  const [cycle, setCycle] = useState<'monthly' | 'annual'>('monthly')
+  const colors = PLAN_COLORS[plan.plan_id] ?? PLAN_COLORS.starter
   const isCurrentPlan = current?.plan === plan.plan_id
 
   const subscribe = async () => {
@@ -36,8 +55,9 @@ function PlanCard({ plan, current, orgId, onSubscribed }) {
         toast.success(`${plan.name} plan activated!`)
       }
       onSubscribed?.()
-    } catch (e) {
-      toast.error(e.response?.data?.detail || 'Subscription failed')
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } } }
+      toast.error(err.response?.data?.detail || 'Subscription failed')
     } finally {
       setLoading(false)
     }
@@ -58,7 +78,7 @@ function PlanCard({ plan, current, orgId, onSubscribed }) {
 
       {/* Billing toggle */}
       <div className="flex gap-1 mb-3 bg-black/20 rounded-lg p-1">
-        {['monthly', 'annual'].map(c => (
+        {(['monthly', 'annual'] as const).map(c => (
           <button
             key={c}
             onClick={() => setCycle(c)}
@@ -75,7 +95,7 @@ function PlanCard({ plan, current, orgId, onSubscribed }) {
 
       {/* Price */}
       <div className="mb-3">
-        <span className="text-white text-3xl font-bold">₹{price.toLocaleString()}</span>
+        <span className="text-white text-3xl font-bold">₹{price.toLocaleString('en-IN')}</span>
         <span className="text-gray-400 text-sm">/{cycle === 'annual' ? 'year' : 'month'}</span>
       </div>
 
@@ -122,7 +142,7 @@ function PlanCard({ plan, current, orgId, onSubscribed }) {
             : `bg-${colors.accent}-600 hover:bg-${colors.accent}-700 text-white`
         }`}
       >
-        {loading ? 'Processing…' : isCurrentPlan ? '✓ Current Plan' : `Subscribe — ₹${price.toLocaleString()}`}
+        {loading ? 'Processing…' : isCurrentPlan ? '✓ Current Plan' : `Subscribe — ₹${price.toLocaleString('en-IN')}`}
       </button>
     </div>
   )
@@ -130,9 +150,11 @@ function PlanCard({ plan, current, orgId, onSubscribed }) {
 
 export default function BillingPanel() {
   const toast = useToast()
-  const [plans, setPlans] = useState([])
-  const [subscription, setSubscription] = useState(null)
-  const [orgId, setOrgId] = useState(localStorage.getItem('active_org_id') || '')
+  const [plans, setPlans] = useState<BillingPlan[]>([])
+  const [subscription, setSubscription] = useState<Subscription | null>(null)
+  const [orgId, setOrgId] = useState<string>(() => {
+    try { return localStorage.getItem('active_org_id') || '' } catch { return '' }
+  })
   const [loading, setLoading] = useState(true)
   const [cancelling, setCancelling] = useState(false)
 
@@ -145,8 +167,8 @@ export default function BillingPanel() {
         const subRes = await apiClient.get(`/billing/subscription/${orgId}`)
         setSubscription(subRes.data)
       }
-    } catch (e) {
-      // ignore
+    } catch {
+      // ignore — demo mode returns empty gracefully
     } finally {
       setLoading(false)
     }
@@ -154,9 +176,9 @@ export default function BillingPanel() {
 
   useEffect(() => { fetchData() }, [orgId])
 
-  const handleOrgIdSave = (id) => {
+  const handleOrgIdSave = (id: string) => {
     setOrgId(id)
-    localStorage.setItem('active_org_id', id)
+    try { localStorage.setItem('active_org_id', id) } catch {}
   }
 
   const handleCancel = async () => {
@@ -164,9 +186,9 @@ export default function BillingPanel() {
     setCancelling(true)
     try {
       await apiClient.post(`/billing/cancel/${orgId}`)
-      fetchData()
+      await fetchData()
       toast.success('Subscription cancelled')
-    } catch (e) {
+    } catch {
       toast.error('Could not cancel subscription. Try again.')
     } finally {
       setCancelling(false)
@@ -174,17 +196,17 @@ export default function BillingPanel() {
   }
 
   return (
-    <div className="bg-gray-900 rounded-xl border border-gray-700 p-4 h-full flex flex-col">
+    <div className="bg-surface-raised rounded-xl border border-surface-border/60 p-4 h-full flex flex-col">
       <div className="flex items-center gap-2 mb-4">
         <span className="text-xl">💳</span>
         <h2 className="text-white font-bold text-lg">Billing & Plans</h2>
-        <span className="text-gray-500 text-xs ml-auto">India (INR) • Razorpay</span>
+        <span className="text-slate-500 text-xs ml-auto">India (INR) • Razorpay</span>
       </div>
 
       {/* Org ID input */}
       <div className="flex gap-2 mb-4">
         <input
-          className="flex-1 bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm"
+          className="flex-1 bg-surface-high border border-surface-border rounded-lg px-3 py-2 text-white text-sm"
           placeholder="Organization ID"
           defaultValue={orgId}
           onBlur={e => handleOrgIdSave(e.target.value.trim())}
@@ -200,12 +222,12 @@ export default function BillingPanel() {
 
       {/* Current sub summary */}
       {subscription?.subscription && (
-        <div className="bg-gray-800 border border-gray-700 rounded-xl p-3 mb-4">
+        <div className="bg-surface-high border border-surface-border rounded-xl p-3 mb-4">
           <div className="flex items-center justify-between">
             <div>
               <div className="text-white font-medium capitalize">{subscription.subscription.plan} Plan</div>
-              <div className="text-gray-400 text-xs">
-                ₹{(subscription.subscription.amount_paise / 100).toLocaleString()}/{subscription.subscription.billing_cycle}
+              <div className="text-slate-400 text-xs">
+                ₹{(subscription.subscription.amount_paise / 100).toLocaleString('en-IN')}/{subscription.subscription.billing_cycle}
                 {' • '}
                 {subscription.subscription.status}
               </div>
@@ -223,7 +245,7 @@ export default function BillingPanel() {
 
       {/* Plan cards */}
       <div className="flex-1 overflow-y-auto">
-        {loading && <div className="text-gray-500 text-center py-8">Loading plans…</div>}
+        {loading && <div className="text-slate-500 text-center py-8">Loading plans…</div>}
         <div className="grid grid-cols-1 gap-4">
           {plans.map(plan => (
             <PlanCard
@@ -237,7 +259,7 @@ export default function BillingPanel() {
         </div>
 
         {/* Razorpay note */}
-        <div className="mt-4 text-center text-gray-600 text-xs">
+        <div className="mt-4 text-center text-slate-600 text-xs">
           Secure payments via Razorpay • UPI, Cards, Net Banking, EMI
         </div>
       </div>

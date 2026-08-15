@@ -1,5 +1,5 @@
 /**
- * frontend/src/api/client.js
+ * frontend/src/api/client.ts
  *
  * Axios HTTP client + WebSocket factory for Industrial Safety Monitor.
  *

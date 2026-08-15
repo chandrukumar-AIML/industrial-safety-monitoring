@@ -1,11 +1,11 @@
-// src/components/ViolationLog.jsx
+// src/components/ViolationLog.tsx
 import { useState, memo, useCallback } from 'react'
 import { format, isValid }             from 'date-fns'
-import PropTypes                       from 'prop-types'
 import { CheckCircle, Eye, AlertTriangle, ClipboardList } from 'lucide-react'
 import { useViolations, useAcknowledge }  from '../hooks/useViolations'
 import { SHAPModal }                      from './SHAPModal'
 import { LOG_FILTERS }                    from '../constants'
+import type { ViolationEvent } from '../types'
 
 const CLASS_COLORS = {
   'no helmet'  : 'bg-red-500/15 text-red-400 border-red-500/30',
@@ -20,7 +20,13 @@ const CLASS_COLORS = {
 
 const FILTERS = LOG_FILTERS
 
-const ViolationRow = memo(function ViolationRow({ v, onExplain, onAck }) {
+interface ViolationRowProps {
+  v: ViolationEvent
+  onExplain: (v: ViolationEvent) => void
+  onAck: (args: { id: number }) => void
+}
+
+const ViolationRow = memo(function ViolationRow({ v, onExplain, onAck }: ViolationRowProps) {
   let time = '—'
   if (v.timestamp) {
     const ts = new Date(v.timestamp)
@@ -67,23 +73,9 @@ const ViolationRow = memo(function ViolationRow({ v, onExplain, onAck }) {
   )
 })
 
-ViolationRow.propTypes = {
-  v: PropTypes.shape({
-    id          : PropTypes.number.isRequired,
-    track_id    : PropTypes.number.isRequired,
-    class_name  : PropTypes.string.isRequired,
-    confidence  : PropTypes.number.isRequired,
-    zone_id     : PropTypes.string,
-    timestamp   : PropTypes.string,
-    acknowledged: PropTypes.bool.isRequired,
-  }).isRequired,
-  onExplain: PropTypes.func.isRequired,
-  onAck    : PropTypes.func.isRequired,
-}
-
 export function ViolationLog() {
-  const [filter,     setFilter]     = useState('all')
-  const [shapTarget, setShapTarget] = useState(null)
+  const [filter,     setFilter]     = useState<string>('all')
+  const [shapTarget, setShapTarget] = useState<ViolationEvent | null>(null)
 
   const {
     data: raw = [],
@@ -102,7 +94,7 @@ export function ViolationLog() {
   const handleAck     = useCallback((args) => ack(args), [ack])
 
   return (
-    <div className="bg-[#0d1117] border border-slate-800/60 rounded-xl
+    <div className="bg-surface border border-slate-800/60 rounded-xl
                     flex flex-col h-full overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-2.5
@@ -155,7 +147,7 @@ export function ViolationLog() {
 
         {!isLoading && !isError && violations.length > 0 && (
           <table className="w-full">
-            <thead className="sticky top-0 bg-[#0d1117]/95
+            <thead className="sticky top-0 bg-surface/95
                               text-slate-600 border-b border-slate-800/50">
               <tr>
                 {['Time','Class','Conf','Zone','Track',''].map(h => (

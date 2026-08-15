@@ -1,5 +1,5 @@
 /**
- * frontend/src/main.jsx
+ * frontend/src/main.tsx
  *
  * Application entry point with providers, error handling, and initialization.
  *
@@ -109,18 +109,14 @@ const injectCSP = () => {
 }
 
 // ── Global fetch auth shim ───────────────────────────────────
-// Several panels use raw fetch() with no Authorization header. In dev the Vite
-// proxy injects the key, but in production (Vercel) there is no proxy, so those
-// calls 401. This wraps window.fetch to attach the Bearer key for requests that
-// target the backend API base — fixing all raw-fetch panels in one place.
-const installFetchAuthShim = () => {
+const installFetchAuthShim = (): void => {
   const API_URL = import.meta.env.VITE_API_URL || ''
   const origFetch = window.fetch.bind(window)
-  window.fetch = (input, init = {}) => {
-    const url = typeof input === 'string' ? input : (input && input.url) || ''
+  window.fetch = (input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> => {
+    const url = typeof input === 'string' ? input : (input instanceof URL ? input.href : (input as Request).url) || ''
     const isApi = url.startsWith(API_URL) || url.startsWith('/api')
     if (isApi) {
-      const headers = new Headers((init && init.headers) || {})
+      const headers = new Headers((init?.headers) || {})
       if (!headers.has('Authorization')) {
         try {
           const token = sessionStorage.getItem('safety_monitor_api_key')

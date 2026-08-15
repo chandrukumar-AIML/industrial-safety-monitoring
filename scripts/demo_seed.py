@@ -24,7 +24,7 @@ from sqlalchemy import text
 UTC = timezone.utc
 def now():    return datetime.now(UTC)
 def ago(**kw):return now() - timedelta(**kw)
-def fmt(dt):  return dt.strftime("%Y-%m-%d %Human:%M:%S") if dt else None
+def fmt(dt):  return dt.strftime("%Y-%m-%d %H:%M:%S") if dt else None
 def fmti(dt): return dt.isoformat() if dt else None
 
 VIOLATION_CLASSES = ["no hardhat","no vest","no gloves","no boots","no goggles","no mask","no harness"]
@@ -461,6 +461,36 @@ async def seed_model_deployments(sess):
         count += 1
     print(f"    OK {count} deployments")
 
+async def seed_industry_ppe_profiles(sess):
+    print("  -> industry PPE profiles...")
+    rows = [
+        # (industry_type, zone_type, required_ppe_json, risk_level, compliance_standard, notes)
+        ("construction",       "hazardous", '["no hardhat","no vest","no gloves","no boots"]',      "CRITICAL","IS 2925 / IS 4770",   "All PPE mandatory in hazardous zones per Factories Act 1948"),
+        ("construction",       "restricted",'["no hardhat","no vest","no boots"]',                  "HIGH",    "IS 2925",             "Head/foot/visibility PPE required in restricted zones"),
+        ("construction",       "general",   '["no hardhat","no vest"]',                             "MEDIUM",  "IS 4770",             "Minimum PPE for general construction zones"),
+        ("steel_manufacturing","hazardous", '["no hardhat","no gloves","no goggles","no boots","no vest"]', "CRITICAL","IS 5983 / IS 6994","Full PPE for hot-work and molten-metal areas"),
+        ("steel_manufacturing","restricted",'["no hardhat","no gloves","no vest"]',                 "HIGH",    "IS 2925 / IS 6994",   "Heat-resistant gloves mandatory in steel handling zones"),
+        ("steel_manufacturing","general",   '["no hardhat","no vest"]',                             "MEDIUM",  "IS 4770",             "Hi-vis and head protection throughout facility"),
+        ("oil_gas",            "hazardous", '["no hardhat","no mask","no gloves","no boots","no vest"]', "CRITICAL","OISD-STD-173",    "Full PPE + ATEX-rated equipment in hazardous areas"),
+        ("oil_gas",            "restricted",'["no hardhat","no mask","no gloves"]',                 "HIGH",    "OISD-STD-173",        "Respiratory protection mandatory in gas-risk zones"),
+        ("oil_gas",            "general",   '["no hardhat","no vest"]',                             "MEDIUM",  "OISD-STD-173",        "Minimum PPE across all oil & gas site areas"),
+        ("pharma",             "hazardous", '["no mask","no gloves","no goggles","no vest"]',       "CRITICAL","GMP Schedule M",      "Clean-room and chemical PPE per Drug & Cosmetics Rules"),
+        ("pharma",             "restricted",'["no mask","no gloves"]',                              "HIGH",    "GMP Schedule M",      "Lab PPE for API handling and formulation areas"),
+        ("pharma",             "general",   '["no mask"]',                                          "MEDIUM",  "IS 9473",             "Face mask mandatory in all pharma production areas"),
+        ("warehouse",          "hazardous", '["no hardhat","no vest","no boots"]',                  "HIGH",    "IS 4770",             "PPE for forklift and heavy-goods areas"),
+        ("warehouse",          "general",   '["no vest"]',                                          "LOW",     "IS 4770",             "Hi-vis vest required throughout warehouse floor"),
+        ("power_plant",        "hazardous", '["no hardhat","no goggles","no boots","no gloves","no vest"]', "CRITICAL","CEA Safety Regs","Full electrical PPE for live-panel and boiler access"),
+    ]
+    for industry, zone_type, ppe_json, risk, standard, notes in rows:
+        await sess.execute(text("""
+            INSERT INTO industry_ppe_profiles
+                (industry_type, zone_type, required_ppe, risk_level, compliance_standard, notes)
+            VALUES (:industry, :zone_type, :ppe, :risk, :standard, :notes)
+        """), dict(industry=industry, zone_type=zone_type, ppe=ppe_json,
+                   risk=risk, standard=standard, notes=notes))
+    print(f"    OK {len(rows)} industry PPE profiles")
+
+
 async def seed_drift_results(sess):
     print("  -> drift detection results...")
     for i in range(8):
@@ -731,6 +761,7 @@ async def run_seed(reset=False):
             await seed_escalations(sess)
             await seed_permits(sess)
             await seed_attendance(sess)
+            await seed_industry_ppe_profiles(sess)
             await sess.commit()
             print("  [phase 4 ok]")
 

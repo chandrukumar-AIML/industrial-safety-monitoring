@@ -1,11 +1,16 @@
-// src/components/SHAPModal.jsx
+// src/components/SHAPModal.tsx
 import { useQuery }        from '@tanstack/react-query'
 import { getSHAP }         from '../api/client'
 import { X, Loader2, AlertTriangle, Sparkles } from 'lucide-react'
 import { useEffect, useRef } from 'react'
-import PropTypes from 'prop-types'
+import type { ViolationEvent } from '../types'
 
-export function SHAPModal({ violation, onClose }) {
+interface SHAPModalProps {
+  violation: Pick<ViolationEvent, 'track_id' | 'class_name' | 'confidence'>
+  onClose: () => void
+}
+
+export function SHAPModal({ violation, onClose }: SHAPModalProps) {
   const { data, isLoading, isError, error } = useQuery({
     queryKey : ['shap', violation.track_id],
     queryFn  : () => getSHAP(violation.track_id).then(r => r.data),
@@ -114,15 +119,6 @@ export function SHAPModal({ violation, onClose }) {
       </div>
     </div>
   )
-}
-
-SHAPModal.propTypes = {
-  violation: PropTypes.shape({
-    track_id  : PropTypes.number.isRequired,
-    class_name: PropTypes.string.isRequired,
-    confidence: PropTypes.number.isRequired,
-  }).isRequired,
-  onClose: PropTypes.func.isRequired,
 }
 
 export default SHAPModal

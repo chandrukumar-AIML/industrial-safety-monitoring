@@ -1,11 +1,16 @@
-// src/components/LiveFeed.jsx
+// src/components/LiveFeed.tsx
 import { useEffect, useRef, useState } from 'react'
-import PropTypes from 'prop-types'
 import { VideoOff, AlertTriangle, Radio, Camera } from 'lucide-react'
 import { useDemoMode } from '../hooks/useDemoMode'
+import type { StreamFrame } from '../types'
 
-export function LiveFeed({ frame = null, connected = false }) {
-  const imgRef   = useRef(null)
+interface LiveFeedProps {
+  frame?: StreamFrame | null
+  connected?: boolean
+}
+
+export function LiveFeed({ frame = null, connected = false }: LiveFeedProps) {
+  const imgRef   = useRef<HTMLImageElement>(null)
   const isDemo   = useDemoMode()
   const [imgError, setImgError] = useState(false)
 
@@ -20,7 +25,7 @@ export function LiveFeed({ frame = null, connected = false }) {
   const showFeed = !!frame && !imgError
 
   return (
-    <div className="bg-[#0d1117] border border-slate-800/60 rounded-xl
+    <div className="bg-surface border border-surface-border/60 rounded-xl
                     overflow-hidden flex flex-col h-full">
 
       {/* Panel header */}
@@ -105,11 +110,6 @@ export function LiveFeed({ frame = null, connected = false }) {
       </div>
     </div>
   )
-}
-
-LiveFeed.propTypes = {
-  frame    : PropTypes.object,
-  connected: PropTypes.bool,
 }
 
 export default LiveFeed

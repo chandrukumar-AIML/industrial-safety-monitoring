@@ -1,5 +1,5 @@
 /**
- * frontend/src/hooks/useWebSocket.js
+ * frontend/src/hooks/useWebSocket.ts
  *
  * Manages WebSocket connection for live video stream with auto-reconnect.
  *
@@ -13,50 +13,22 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { createStreamSocket } from '../api/client'
+import type { StreamFrame, UseWebSocketOptions, UseWebSocketReturn } from '../types'
 
-// Reconnection config
 const MAX_RETRIES = 10
 const INITIAL_RETRY_DELAY_MS = 1_000
 const MAX_RETRY_DELAY_MS = 30_000
 const RETRY_BACKOFF_MULTIPLIER = 1.5
 
-/**
- * @typedef {Object} StreamFrame
- * @property {'frame'} type
- * @property {string} timestamp
- * @property {number} frame_idx
- * @property {string} jpeg_b64
- * @property {number} active_tracks
- * @property {number} active_violations
- * @property {number} fps
- */
+interface WsState {
+  frame: StreamFrame | null
+  connected: boolean
+  connecting: boolean
+  fps: number
+  violations: number
+}
 
-/**
- * @typedef {Object} UseWebSocketReturn
- * @property {StreamFrame|null} frame - Latest frame data
- * @property {boolean} connected - True if WebSocket is open
- * @property {boolean} connecting - True while attempting to connect
- * @property {number} fps - Current pipeline FPS (from latest frame)
- * @property {number} violations - Active violations count (from latest frame)
- * @property {number} retryCount - Current reconnection attempt count
- * @property {() => void} reconnect - Manual reconnect trigger
- * @property {() => void} disconnect - Manual disconnect
- */
-
-/**
- * Manages a WebSocket connection to the frame stream endpoint.
- * 
- * @param {Object} [options]
- * @param {number} [options.pingMs=20000] - Keepalive ping interval in ms
- * @param {boolean} [options.autoReconnect=true] - Auto-reconnect on disconnect
- * @returns {UseWebSocketReturn}
- * 
- * @example
- * const { frame, connected, fps, violations } = useWebSocket()
- * if (!connected) return <ConnectionStatus />
- * return <VideoFrame src={`data:image/jpeg;base64,${frame.jpeg_b64}`} />
- */
-export function useWebSocket(options = {}) {
+export function useWebSocket(options: UseWebSocketOptions = {}): UseWebSocketReturn {
   const {
     pingMs = 20_000,
     autoReconnect = true,
@@ -68,7 +40,7 @@ export function useWebSocket(options = {}) {
     console.warn(`useWebSocket: pingMs clamped to ${validatedPingMs}ms`)
   }
 
-  const [state, setState] = useState({
+  const [state, setState] = useState<WsState>({
     frame: null,
     connected: false,
     connecting: true,
@@ -77,11 +49,11 @@ export function useWebSocket(options = {}) {
   })
 
   // Refs for cleanup and avoiding stale closures
-  const socketRef = useRef(null)
-  const retryCountRef = useRef(0)
-  const retryTimeoutRef = useRef(null)
-  const isMountedRef = useRef(true)
-  const lastFrameTimeRef = useRef(0)
+  const socketRef = useRef<WebSocket | null>(null)
+  const retryCountRef = useRef<number>(0)
+  const retryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const isMountedRef = useRef<boolean>(true)
+  const lastFrameTimeRef = useRef<number>(0)
 
   // Calculate next retry delay with exponential backoff + jitter
   const calculateRetryDelay = useCallback((attempt) => {

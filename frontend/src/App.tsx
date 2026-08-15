@@ -1,13 +1,15 @@
 /**
- * frontend/src/App.jsx
+ * frontend/src/App.tsx
  *
- * Root application component with routing, auth state, and layout.
- * FIXED: Imports from ./components/ (not ./pages/) to match your project structure
+ * Root application component — React 19 + TypeScript + Framer Motion.
+ * Dark-first: #080808 background, #6366F1 accent (Chandru fingerprint).
  */
 
-import { useState, useEffect, useRef, useCallback, useContext, Suspense, lazy, createContext } from 'react'
+import { useState, useRef, useCallback, useContext, Suspense, lazy, createContext } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { AnimatePresence, motion } from 'framer-motion'
+import type { AuthContextValue } from './types'
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools'
 
 // Lazy-load components from ./components/ (your actual structure)
@@ -62,42 +64,27 @@ import ErrorBoundary from './components/ErrorBoundary'
 import { ToastProvider } from './components/Toast'
 
 // ── Simple Auth Context ─────────────────────────────────────
-const AuthContext = createContext(null)
+const AuthContext = createContext<AuthContextValue | null>(null)
 
-function AuthProvider({ children }) {
+interface AuthProviderProps { children: React.ReactNode }
+
+function AuthProvider({ children }: AuthProviderProps): React.ReactElement {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
-  // FIXED: Use sessionStorage instead of localStorage for API keys.
-  // localStorage persists across tabs and browser sessions — an XSS attack on any tab
-  // can steal it. sessionStorage is cleared when the tab closes, limiting exposure.
-  const [apiKey, setApiKey] = useState(() => {
-    try {
-      return sessionStorage.getItem(AUTH_STORAGE_KEY) || ''
-    } catch {
-      return ''
-    }
+  const [apiKey, setApiKey] = useState<string>(() => {
+    try { return sessionStorage.getItem(AUTH_STORAGE_KEY) || '' }
+    catch { return '' }
   })
 
-  useEffect(() => {
-    if (apiKey) {
-      try {
-        sessionStorage.setItem(AUTH_STORAGE_KEY, apiKey)
-      } catch (e) {
-        console.warn('Failed to persist API key:', e)
-      }
-    }
-  }, [apiKey])
-
-  const login = useCallback((key) => {
+  const login = useCallback((key: string) => {
     setApiKey(key)
     setIsAuthenticated(true)
+    try { sessionStorage.setItem(AUTH_STORAGE_KEY, key) } catch {}
   }, [])
 
   const logout = useCallback(() => {
     setApiKey('')
     setIsAuthenticated(false)
-    try {
-      sessionStorage.removeItem(AUTH_STORAGE_KEY)
-    } catch {}
+    try { sessionStorage.removeItem(AUTH_STORAGE_KEY) } catch {}
   }, [])
 
   return (
@@ -108,11 +95,14 @@ function AuthProvider({ children }) {
 }
 
 // ── Auth helpers ─────────────────────────────────────────────
-function useAuth() {
-  return useContext(AuthContext)
+function useAuth(): AuthContextValue {
+  const ctx = useContext(AuthContext)
+  if (!ctx) throw new Error('useAuth must be used inside AuthProvider')
+  return ctx
 }
 
-function RequireAuth({ children }) {
+interface RequireAuthProps { children: React.ReactNode }
+function RequireAuth({ children }: RequireAuthProps): React.ReactElement {
   const auth = useAuth()
   if (!auth?.isAuthenticated) {
     return <Navigate to="/login" replace />
@@ -121,11 +111,18 @@ function RequireAuth({ children }) {
 }
 
 // ── Dashboard Shell (authenticated app) ──────────────────────
-function DashboardShell() {
+// Framer Motion page transition variants
+const pageVariants = {
+  initial: { opacity: 0, y: 8 },
+  animate: { opacity: 1, y: 0, transition: { duration: 0.18, ease: 'easeOut' } },
+  exit:    { opacity: 0, y: -8, transition: { duration: 0.12 } },
+}
+
+function DashboardShell(): React.ReactElement {
   const { logout } = useAuth()
-  const [activeTab, setActiveTab] = useState('dashboard')
-  const [showZoneDrawer, setShowZoneDrawer] = useState(false)
-  const [showChat, setShowChat] = useState(false)
+  const [activeTab, setActiveTab] = useState<string>('dashboard')
+  const [showZoneDrawer, setShowZoneDrawer] = useState<boolean>(false)
+  const [showChat, setShowChat] = useState<boolean>(false)
 
   const wsRef = useRef(null)
   // FIXED: useWebSocket already opens its own socket internally.
@@ -233,6 +230,8 @@ function DashboardShell() {
                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-500"></div>
                   </div>
                 }>
+                  <AnimatePresence mode="wait">
+                  <motion.div key={activeTab} {...pageVariants}>
                   {/* Dashboard View */}
                   {activeTab === 'dashboard' && (
                     <div className="space-y-6">
@@ -440,6 +439,8 @@ function DashboardShell() {
                       <ProximityPanel wsRef={wsRef} />
                     </div>
                   )}
+                  </motion.div>
+                  </AnimatePresence>
                 </Suspense>
                 </ErrorBoundary>
               </main>
@@ -478,7 +479,7 @@ function DashboardShell() {
 }
 
 // ── Routes ───────────────────────────────────────────────────
-function AppRoutes() {
+function AppRoutes(): React.ReactElement {
   const { login, isAuthenticated } = useAuth()
   return (
     <Suspense fallback={
@@ -501,7 +502,7 @@ function AppRoutes() {
 }
 
 // ── Main App Component ───────────────────────────────────────
-export default function App() {
+export default function App(): React.ReactElement {
   // Query client
   const queryClient = useRef(
     new QueryClient({

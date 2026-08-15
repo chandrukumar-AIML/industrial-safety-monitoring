@@ -1,19 +1,38 @@
-// src/components/StatCards.jsx
+// src/components/StatCards.tsx
 import { useMemo } from 'react'
-import PropTypes from 'prop-types'
 import { ShieldAlert, Users, Zap, BarChart2, AlertOctagon, MapPin, CheckCircle2 } from 'lucide-react'
 import { useStats } from '../hooks/useViolations'
 import { useDemoMode } from '../hooks/useDemoMode'
+
+interface StatCardsProps {
+  fps?: number
+  violations?: number
+  activeTracks?: number
+}
+
+interface CardAccent {
+  ring: string
+  bg: string
+  icon: string
+  val: string
+}
+
+interface Card {
+  icon: React.ReactNode
+  label: string
+  value: string | number
+  accent: CardAccent
+}
 
 export function StatCards({
   fps          = 0,
   violations   = 0,
   activeTracks = 0,
-}) {
+}: StatCardsProps) {
   const { data: stats } = useStats()
   const isDemo = useDemoMode()
 
-  const cards = useMemo(() => {
+  const cards = useMemo<Card[]>(() => {
     // ── Demo mode: live pipeline KPIs are legitimately 0, so surface the rich
     //    aggregate data instead of 0 / 0 / 0.0 (which reads as "broken"). ──
     if (isDemo) {
@@ -98,12 +117,6 @@ export function StatCards({
       ))}
     </div>
   )
-}
-
-StatCards.propTypes = {
-  fps         : PropTypes.number,
-  violations  : PropTypes.number,
-  activeTracks: PropTypes.number,
 }
 
 export default StatCards

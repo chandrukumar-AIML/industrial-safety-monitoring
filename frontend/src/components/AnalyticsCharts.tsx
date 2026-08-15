@@ -80,7 +80,7 @@ export function AnalyticsCharts() {
 
   if (isLoading) {
     return (
-      <div className="bg-[#0d1117] border border-slate-800/60 rounded-xl
+      <div className="bg-surface border border-slate-800/60 rounded-xl
                       p-4 text-slate-600 text-sm flex items-center
                       justify-center h-48">
         Loading analytics…
@@ -90,7 +90,7 @@ export function AnalyticsCharts() {
 
   if (isError) {
     return (
-      <div className="bg-[#0d1117] border border-slate-800/60 rounded-xl
+      <div className="bg-surface border border-slate-800/60 rounded-xl
                       p-4 flex flex-col items-center justify-center
                       h-48 gap-2 text-red-400/70">
         <AlertTriangle size={18}/>
@@ -113,7 +113,7 @@ export function AnalyticsCharts() {
       <div className="grid grid-cols-3 gap-3">
         {SUMMARY.map(c => (
           <div key={c.label}
-               className="bg-[#0d1117] border border-slate-800/60 rounded-xl
+               className="bg-surface border border-slate-800/60 rounded-xl
                           p-4 text-center">
             <p className={`text-3xl font-bold tabular-nums ${c.color}`}>{c.value}</p>
             <p className="text-slate-600 text-xs mt-1">{c.label}</p>
@@ -123,7 +123,7 @@ export function AnalyticsCharts() {
 
       {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="bg-[#0d1117] border border-slate-800/60 rounded-xl p-4">
+        <div className="bg-surface border border-slate-800/60 rounded-xl p-4">
           <div className="flex items-center gap-2 mb-4">
             <TrendingUp size={13} className="text-slate-500"/>
             <p className="text-xs font-medium text-slate-300">Violations by class</p>
@@ -141,7 +141,7 @@ export function AnalyticsCharts() {
           </div>
         </div>
 
-        <div className="bg-[#0d1117] border border-slate-800/60 rounded-xl p-4">
+        <div className="bg-surface border border-slate-800/60 rounded-xl p-4">
           <div className="flex items-center gap-2 mb-4">
             <TrendingUp size={13} className="text-slate-500"/>
             <p className="text-xs font-medium text-slate-300">Violations by zone</p>

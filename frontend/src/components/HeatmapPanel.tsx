@@ -31,7 +31,7 @@ export function HeatmapPanel() {
   const frameCount = Number(meta?.frame_count ?? meta?.stats?.frame_count ?? 0)
 
   return (
-    <div className="bg-[#0d1117] border border-slate-800/60 rounded-xl
+    <div className="bg-surface border border-slate-800/60 rounded-xl
                     p-4 flex flex-col gap-3 h-full">
       {/* Header */}
       <div className="flex items-center justify-between">

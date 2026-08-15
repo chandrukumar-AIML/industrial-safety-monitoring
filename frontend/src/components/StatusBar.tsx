@@ -1,15 +1,20 @@
-// src/components/StatusBar.jsx
-import PropTypes from 'prop-types'
+// src/components/StatusBar.tsx
 import { useQuery } from '@tanstack/react-query'
 import { getHealth } from '../api/client'
 import { Activity, Wifi, WifiOff, ShieldCheck } from 'lucide-react'
 import { useDemoMode } from '../hooks/useDemoMode'
 
+interface StatusBarProps {
+  wsConnected?: boolean
+  fps?: number
+  violations?: number
+}
+
 export function StatusBar({
   wsConnected = false,
   fps         = 0,
   violations  = 0,
-}) {
+}: StatusBarProps) {
   const isDemo = useDemoMode()
   const { data: health, isError: healthError } = useQuery({
     queryKey       : ['health'],
@@ -19,7 +24,7 @@ export function StatusBar({
 
   return (
     <header
-      className="bg-[#0d1117] border-b border-slate-800/60
+      className="bg-surface border-b border-surface-border/60
                  px-5 py-2.5 flex items-center justify-between
                  sticky top-0 z-20"
       role="banner"
@@ -105,12 +110,6 @@ export function StatusBar({
       </div>
     </header>
   )
-}
-
-StatusBar.propTypes = {
-  wsConnected: PropTypes.bool,
-  fps        : PropTypes.number,
-  violations : PropTypes.number,
 }
 
 export default StatusBar

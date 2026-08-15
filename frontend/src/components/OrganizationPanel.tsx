@@ -53,11 +53,11 @@ function CreateOrgModal({ onClose, onCreated }) {
 
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-      <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 w-96">
+      <div className="bg-surface border border-surface-border/60 rounded-xl p-6 w-96">
         <h3 className="text-white font-bold mb-4">Create Organization</h3>
         <div className="space-y-3">
           <input
-            className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm"
+            className="w-full bg-surface-high border border-surface-border rounded-lg px-3 py-2 text-white text-sm"
             placeholder="Organization name *"
             value={form.org_name}
             onChange={e => setForm(f => ({ ...f, org_name: e.target.value }))}
@@ -67,7 +67,7 @@ function CreateOrgModal({ onClose, onCreated }) {
             <select
               value={form.industry_type}
               onChange={e => setForm(f => ({ ...f, industry_type: e.target.value }))}
-              className="bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm"
+              className="bg-surface-high border border-surface-border rounded-lg px-3 py-2 text-white text-sm"
             >
               {Object.keys(INDUSTRY_ICONS).map(i => (
                 <option key={i} value={i}>
@@ -78,7 +78,7 @@ function CreateOrgModal({ onClose, onCreated }) {
             <select
               value={form.plan}
               onChange={e => setForm(f => ({ ...f, plan: e.target.value }))}
-              className="bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm"
+              className="bg-surface-high border border-surface-border rounded-lg px-3 py-2 text-white text-sm"
             >
               <option value="starter">Starter ₹4,999/mo</option>
               <option value="growth">Growth ₹14,999/mo</option>
@@ -86,7 +86,7 @@ function CreateOrgModal({ onClose, onCreated }) {
             </select>
           </div>
           <input
-            className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm"
+            className="w-full bg-surface-high border border-surface-border rounded-lg px-3 py-2 text-white text-sm"
             placeholder="Admin email"
             value={form.admin_email}
             onChange={e => setForm(f => ({ ...f, admin_email: e.target.value }))}
@@ -125,7 +125,7 @@ function OrgCard({ org, onRefresh }) {
   }
 
   return (
-    <div className="bg-gray-800 border border-gray-700 rounded-xl p-4 mb-3">
+    <div className="bg-surface-high border border-surface-border/60 rounded-xl p-4 mb-3">
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
@@ -205,7 +205,7 @@ export default function OrganizationPanel() {
   }
 
   return (
-    <div className="bg-gray-900 rounded-xl border border-gray-700 p-4 h-full flex flex-col">
+    <div className="bg-surface rounded-xl border border-surface-border/60 p-4 h-full flex flex-col">
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
           <span className="text-xl">🏢</span>
@@ -236,7 +236,7 @@ export default function OrganizationPanel() {
 
       {/* Search */}
       <input
-        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm mb-4"
+        className="w-full bg-surface-high border border-surface-border/60 rounded-lg px-3 py-2 text-white text-sm mb-4"
         placeholder="Search organizations…"
         value={search}
         onChange={e => setSearch(e.target.value)}

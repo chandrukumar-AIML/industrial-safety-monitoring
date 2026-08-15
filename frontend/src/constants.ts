@@ -1,5 +1,5 @@
 /**
- * frontend/src/constants.js
+ * frontend/src/constants.ts
  *
  * Application-wide constants, configuration, and enums.
  *
@@ -163,13 +163,7 @@ export const REPORT_SEVERITY_COLORS = {
 }
 
 // ── Helper Functions ─────────────────────────────────────────
-/**
- * Format a timestamp for display
- * @param {string} isoString - ISO 8601 timestamp
- * @param {boolean} showSeconds - Include seconds in output
- * @returns {string} Formatted time string
- */
-export const formatTimestamp = (isoString, showSeconds = false) => {
+export const formatTimestamp = (isoString: string, showSeconds = false): string => {
   try {
     const date = new Date(isoString)
     return date.toLocaleTimeString('en-US', {
@@ -183,22 +177,12 @@ export const formatTimestamp = (isoString, showSeconds = false) => {
   }
 }
 
-/**
- * Format a violation class name for display
- * @param {string} className - Machine-readable class name
- * @returns {string} Human-readable label
- */
-export const formatViolationClass = (className) => {
+export const formatViolationClass = (className: string): string => {
   return VIOLATION_CLASSES[className]?.label || 
          className.replace(/^no\s+/i, 'Missing ').replace(/\b\w/g, l => l.toUpperCase())
 }
 
-/**
- * Get color configuration for a violation class
- * @param {string} className - Violation class name
- * @returns {Object} Color configuration
- */
-export const getViolationColors = (className) => {
+export const getViolationColors = (className: string): { bg: string; text: string; border: string } => {
   const config = VIOLATION_CLASSES[className]
   return {
     bg: `${config?.color}-500/15`,
@@ -207,23 +191,13 @@ export const getViolationColors = (className) => {
   }
 }
 
-/**
- * Validate an RTSP/HTTP URL
- * @param {string} url - URL to validate
- * @returns {boolean} True if valid
- */
-export const isValidStreamUrl = (url) => {
+export const isValidStreamUrl = (url: string): boolean => {
   if (!url || !url.trim()) return false
   // Allow rtsp://, rtmp://, http://, https://, or numeric device index
   return /^(rtsp|rtmp|https?):\/\/[^ ]+$/.test(url.trim()) || /^\d+$/.test(url.trim())
 }
 
-/**
- * Sanitize a camera ID for safe usage
- * @param {string} id - Raw camera ID
- * @returns {string} Sanitized ID
- */
-export const sanitizeCameraId = (id) => {
+export const sanitizeCameraId = (id: string): string => {
   if (!id) return ''
   // Allow only alphanumeric, underscore, hyphen
   return id.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 100)

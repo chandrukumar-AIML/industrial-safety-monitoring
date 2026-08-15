@@ -41,17 +41,17 @@ function CheckInForm({ onSuccess }) {
   }
 
   return (
-    <div className="bg-gray-800 rounded-xl border border-gray-700 p-4 mb-4">
+    <div className="bg-surface-high rounded-xl border border-surface-border/60 p-4 mb-4">
       <h3 className="text-white font-medium text-sm mb-3">Manual Check-In / Check-Out</h3>
       <div className="flex gap-2 mb-2">
         <input
-          className="flex-1 bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm"
+          className="flex-1 bg-gray-700 border border-surface-border rounded-lg px-3 py-2 text-white text-sm"
           placeholder="Worker ID / Badge"
           value={workerId}
           onChange={e => setWorkerId(e.target.value)}
         />
         <input
-          className="w-32 bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm"
+          className="w-32 bg-gray-700 border border-surface-border rounded-lg px-3 py-2 text-white text-sm"
           placeholder="Site ID"
           value={siteId}
           onChange={e => setSiteId(e.target.value)}
@@ -126,7 +126,7 @@ export default function AttendancePanel() {
   }
 
   return (
-    <div className="bg-gray-900 rounded-xl border border-gray-700 p-4 h-full flex flex-col">
+    <div className="bg-surface rounded-xl border border-surface-border/60 p-4 h-full flex flex-col">
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
@@ -185,7 +185,7 @@ export default function AttendancePanel() {
           {activeWorkers.map((w, i) => (
             <div
               key={i}
-              className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 flex items-center justify-between"
+              className="bg-surface-high border border-surface-border/60 rounded-lg px-3 py-2 flex items-center justify-between"
             >
               <div>
                 <div className="text-white text-sm font-medium">

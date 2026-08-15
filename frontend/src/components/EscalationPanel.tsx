@@ -19,14 +19,14 @@ function AckModal({ alert, onClose, onAck }) {
   const [name, setName] = useState('')
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-      <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 w-80">
+      <div className="bg-surface border border-surface-border/60 rounded-xl p-6 w-80">
         <h3 className="text-white font-bold mb-3">Acknowledge Alert #{alert.id}</h3>
         <p className="text-gray-400 text-sm mb-4">
           Violation: <span className="text-white">{alert.class_name || 'N/A'}</span><br />
           Zone: <span className="text-white">{alert.zone_id || 'N/A'}</span>
         </p>
         <input
-          className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm mb-4"
+          className="w-full bg-surface-high border border-surface-border rounded-lg px-3 py-2 text-white text-sm mb-4"
           placeholder="Your name / badge ID"
           value={name}
           onChange={e => setName(e.target.value)}
@@ -99,7 +99,7 @@ export default function EscalationPanel() {
   const totalOpen = alerts.length
 
   return (
-    <div className="bg-gray-900 rounded-xl border border-gray-700 p-4 h-full flex flex-col">
+    <div className="bg-surface rounded-xl border border-surface-border/60 p-4 h-full flex flex-col">
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
