@@ -156,7 +156,7 @@ jobs:
       - name: Build frontend image
         uses: docker/build-push-action@v5
         with:
-          context: ./frontend
+          context: .
           file: docker/Dockerfile.frontend
           push: false
           tags: safety-monitor-frontend:ci
