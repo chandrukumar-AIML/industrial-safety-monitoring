@@ -121,6 +121,38 @@ moment it appears, on the cameras you already own.*
 └──────────────────────────────────────────────────────────────────┘
 ```
 
+```mermaid
+flowchart TD
+    CAM["📹 Camera Feeds\nRTSP · Webcam · File"]
+
+    subgraph CV["CV Inference Pipeline (parallel threads)"]
+        YOLO["YOLOv8 PPE\n6 classes · ByteTrack"]
+        POSE["MediaPipe\nPose & Hazard"]
+        FACE["DeepFace\nIdentity · Risk Score"]
+    end
+
+    AGENT["🤖 LangGraph 8-Node Agent\nDetect → History → Score → Alert Level\n→ Report → Send → Log → Compliance\nLLM chain: Groq → Gemini → OpenAI → Ollama → Template"]
+
+    subgraph BACKEND["FastAPI Backend (39 endpoints)"]
+        API["4-role RBAC · Pydantic v2\nISO 45001 Audit Log · Razorpay Billing"]
+        DB[("PostgreSQL\nSQLModel async ORM")]
+        MLFLOW["MLflow\nModel Registry · Canary Deploy"]
+        RAG["ChromaDB\nRAG Safety Chatbot"]
+    end
+
+    ALERTS["🚨 Multi-Channel Alerts\nEmail · WhatsApp · Slack · JIRA\nL1 → L4 Escalation Matrix"]
+    FRONTEND["⚛️ React 19 + TypeScript\n12-tab Dashboard · WebSocket Live Feed\nSHAP Explainability · MLOps Panel · Billing"]
+
+    CAM --> YOLO & POSE & FACE
+    YOLO & POSE & FACE --> AGENT
+    AGENT --> API
+    AGENT --> ALERTS
+    API <--> DB
+    API --> MLFLOW
+    API --> RAG
+    API --> FRONTEND
+```
+
 ```
 industrial-safety-monitoring/
 │
@@ -406,13 +438,35 @@ See `.env.example` for the full list.
 
 ---
 
-## 🐳 Docker
+## 🐳 Docker Compose — Full-Stack Quickstart
+
+> **Reproducible in 3 commands** — no camera, GPU, or API keys required in demo mode.
 
 ```bash
-# Full stack (backend + frontend + DB)
-docker-compose up -d
+# 1. Copy env — demo defaults pre-set, works out of the box
+cp .env.example .env
 
-# Backend only
+# 2. Start full stack: PostgreSQL + MLflow + Backend + Frontend
+docker compose up -d
+
+# 3. Verify (wait ~30 s for DB init and demo seed)
+curl http://localhost:8000/health/live   # → {"status":"ok"}
+```
+
+Open **http://localhost:3000** for the React dashboard.  
+API docs: **http://localhost:8000/docs**
+
+| Service  | URL                              | Notes                        |
+|----------|----------------------------------|------------------------------|
+| Frontend | http://localhost:3000            | React 19 dashboard           |
+| Backend  | http://localhost:8000/docs       | FastAPI Swagger UI           |
+| MLflow   | http://localhost:5000            | Experiment tracking          |
+
+> **Demo mode** is off by default. Set `DEMO_MODE=true` in `.env` before `docker compose up`
+> to auto-seed 22 tables with synthetic violation events — no real cameras needed.
+
+```bash
+# Backend only (no Docker Compose)
 docker build -f docker/Dockerfile.backend -t safety-backend .
 docker run -p 8000:8000 --env-file .env safety-backend
 ```
