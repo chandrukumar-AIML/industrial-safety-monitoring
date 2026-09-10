@@ -198,6 +198,8 @@ CAMERA FRAME
 ```
 
 > **Design rule:** LLM is used only for natural-language narrative generation (Stage 2, Node 5). Safety thresholds, severity scoring, and escalation decisions are deterministic Python logic — never delegated to the model.
+>
+> Full evaluation methodology with per-class TP/FP/FN tables, RAG groundedness scores, and agent task success rates: [`AI_EVALUATION.md`](AI_EVALUATION.md)
 
 ### CV Model Evaluation
 
