@@ -52,17 +52,27 @@ if not ADMIN_API_KEY and RBAC_ENABLED:
 class Role(IntEnum):
     """Privilege levels — higher value = more access."""
     VIEWER = 1
-    OPERATOR = 2
-    MANAGER = 3
+    WORKER = 2      # alias: operator
+    SUPERVISOR = 3  # alias: manager
     ADMIN = 4
 
 
-# Human-readable names
+# Human-readable names — primary spec names with legacy aliases
 ROLE_NAMES = {
     Role.VIEWER: "viewer",
-    Role.OPERATOR: "operator",
-    Role.MANAGER: "manager",
+    Role.WORKER: "worker",
+    Role.SUPERVISOR: "supervisor",
     Role.ADMIN: "admin",
+}
+
+# Legacy aliases for backward compatibility
+ROLE_ALIASES = {
+    "operator": Role.WORKER,
+    "manager": Role.SUPERVISOR,
+    "worker": Role.WORKER,
+    "supervisor": Role.SUPERVISOR,
+    "viewer": Role.VIEWER,
+    "admin": Role.ADMIN,
 }
 
 # Static key → role mapping (production: load from DB)
@@ -83,10 +93,13 @@ def _load_static_keys() -> None:
     if ADMIN_API_KEY:
         _STATIC_KEY_MAP[_hash_key(ADMIN_API_KEY)] = Role.ADMIN
 
-    # Additional role-keyed env vars: MANAGER_API_KEY, OPERATOR_API_KEY, VIEWER_API_KEY
+    # Spec roles: SUPERVISOR_API_KEY, WORKER_API_KEY, VIEWER_API_KEY
+    # Legacy aliases also accepted: MANAGER_API_KEY, OPERATOR_API_KEY
     for role, env_var in [
-        (Role.MANAGER, "MANAGER_API_KEY"),
-        (Role.OPERATOR, "OPERATOR_API_KEY"),
+        (Role.SUPERVISOR, "SUPERVISOR_API_KEY"),
+        (Role.SUPERVISOR, "MANAGER_API_KEY"),   # legacy alias
+        (Role.WORKER, "WORKER_API_KEY"),
+        (Role.WORKER, "OPERATOR_API_KEY"),       # legacy alias
         (Role.VIEWER, "VIEWER_API_KEY"),
     ]:
         key = os.getenv(env_var, "")

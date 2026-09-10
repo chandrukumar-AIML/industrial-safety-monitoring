@@ -4,33 +4,32 @@ export default {
   theme: {
     extend: {
       colors: {
-        // ── Brand: Hi-Vis Amber (safety vests/helmets) ──
-        // Unique vs competitors (Intenseye/Protex/Voxel all use blue/teal)
+        // ── Brand: Indigo #6366F1 (Chandru fingerprint) ──
         brand: {
-          50:  '#fffbeb',
-          100: '#fef3c7',
-          200: '#fde68a',
-          300: '#fcd34d',
-          400: '#fbbf24',
-          500: '#f59e0b',   // primary
-          600: '#f97316',   // primary-hover (safety orange)
-          700: '#ea580c',
-          800: '#c2410c',
-          900: '#9a3412',
-          DEFAULT: '#f59e0b',
+          50:  '#eef2ff',
+          100: '#e0e7ff',
+          200: '#c7d2fe',
+          300: '#a5b4fc',
+          400: '#818cf8',
+          500: '#6366f1',   // primary #6366F1
+          600: '#4f46e5',   // primary-hover
+          700: '#4338ca',
+          800: '#3730a3',
+          900: '#312e81',
+          DEFAULT: '#6366f1',
         },
-        // ── Surfaces: deep slate ──
+        // ── Surfaces: near-black #080808 (Chandru fingerprint) ──
         surface: {
-          DEFAULT: '#0f172a',   // app background
-          raised:  '#1e293b',   // cards/panels
-          high:    '#334155',   // hover/raised
-          border:  '#334155',
+          DEFAULT: '#080808',   // app background
+          raised:  '#111111',   // cards/panels
+          high:    '#1a1a1a',   // hover/raised
+          border:  '#2a2a2a',
         },
       },
       backgroundImage: {
-        'brand-gradient': 'linear-gradient(135deg, #f59e0b 0%, #f97316 100%)',
-        'hero-glow': 'radial-gradient(ellipse at top, rgba(245,158,11,0.15), transparent 60%)',
-        'grid-pattern': 'linear-gradient(rgba(245,158,11,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(245,158,11,0.04) 1px, transparent 1px)',
+        'brand-gradient': 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
+        'hero-glow': 'radial-gradient(ellipse at top, rgba(99,102,241,0.15), transparent 60%)',
+        'grid-pattern': 'linear-gradient(rgba(99,102,241,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(99,102,241,0.04) 1px, transparent 1px)',
       },
       animation: {
         'pulse-fast': 'pulse 1s cubic-bezier(0.4,0,0.6,1) infinite',

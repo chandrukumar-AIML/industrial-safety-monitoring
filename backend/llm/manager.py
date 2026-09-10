@@ -1,17 +1,18 @@
 """
 backend/llm/manager.py
 
-Enterprise LLM Manager — Full fallback chain.
+Enterprise LLM Manager — Chandru fingerprint fallback chain.
 Tries providers in order until one succeeds.
 
 Priority chain:
-  1. Groq          → FREE, 14,400 req/day, llama-3.1-8b-instant
-  2. OpenRouter    → FREE tier, 50 req/day backup
-  3. OpenAI        → Paid, highest quality
-  4. Ollama        → Self-hosted, unlimited (local/on-prem only)
-  5. Template      → Always works, no API needed
+  1. Groq    → FREE, 14,400 req/day, llama-3.1-8b-instant
+  2. Gemini  → Google Generative AI, free tier available
+  3. OpenAI  → Paid, gpt-4o-mini
+  4. Ollama  → Self-hosted, unlimited (local/on-prem only)
+  5. Template → Always works, zero dependencies
 
-Render Deploy: Add GROQ_API_KEY env var → cost = ₹0
+Env vars: GROQ_API_KEY, GEMINI_API_KEY, OPENAI_API_KEY
+Cost in demo mode (all keys unset): ₹0
 
 Usage:
     from backend.llm import llm_manager
@@ -69,29 +70,33 @@ _TEMPLATES = {
 class LLMManager:
     """
     Enterprise LLM Manager with full provider fallback chain.
+    Chain: Groq → Gemini → OpenAI → Ollama → Template
     Thread-safe, async-first, zero mandatory dependencies.
     """
 
     def __init__(self):
         self._groq_key = os.getenv("GROQ_API_KEY", "")
         self._groq_model = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
-        self._openrouter_key = os.getenv("OPENROUTER_API_KEY", "")
-        self._openrouter_model = os.getenv(
-            "OPENROUTER_MODEL", "meta-llama/llama-3-8b-instruct:free"
-        )
+        self._gemini_key = os.getenv("GEMINI_API_KEY", "")
+        self._gemini_model = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
         self._openai_key = os.getenv("OPENAI_API_KEY", "")
         self._openai_model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
         self._ollama_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
         self._ollama_model = os.getenv("OLLAMA_MODEL", "llama3")
 
+        # Cost tracking (tokens used per provider)
+        self._cost_tracker: dict[str, int] = {
+            "groq": 0, "gemini": 0, "openai": 0, "ollama": 0, "template": 0
+        }
+
         # Log which providers are available
         available = []
-        if self._groq_key:       available.append("groq ✅")
-        if self._openrouter_key: available.append("openrouter ✅")
-        if self._openai_key:     available.append("openai ✅")
+        if self._groq_key:   available.append("groq ✅")
+        if self._gemini_key: available.append("gemini ✅")
+        if self._openai_key: available.append("openai ✅")
         available.append("ollama (local)")
         available.append("template (always)")
-        logger.info("LLM Manager initialized | providers: {}", " → ".join(available))
+        logger.info("LLM Manager initialized | chain: {}", " → ".join(available))
 
     # ── Public API ────────────────────────────────────────────
 
@@ -121,12 +126,12 @@ class LLMManager:
 
         start = time.time()
 
-        # Try each provider in order
+        # Chandru fingerprint: Groq → Gemini → OpenAI → Ollama fallback chain
         providers = [
-            ("groq",        self._call_groq),
-            ("openrouter",  self._call_openrouter),
-            ("openai",      self._call_openai),
-            ("ollama",      self._call_ollama),
+            ("groq",   self._call_groq),
+            ("gemini", self._call_gemini),
+            ("openai", self._call_openai),
+            ("ollama", self._call_ollama),
         ]
 
         for name, fn in providers:
@@ -134,9 +139,11 @@ class LLMManager:
                 result = await fn(prompt, max_tokens, temperature)
                 if result and len(result.strip()) > 10:
                     elapsed = time.time() - start
+                    token_est = len(result.split())
+                    self._cost_tracker[name] = self._cost_tracker.get(name, 0) + token_est
                     logger.info(
                         "LLM response | provider={} | tokens≈{} | time={:.2f}s",
-                        name, len(result.split()), elapsed
+                        name, token_est, elapsed
                     )
                     return result.strip()
             except Exception as exc:
@@ -252,28 +259,29 @@ Be concise and professional."""
             resp.raise_for_status()
             return resp.json()["choices"][0]["message"]["content"]
 
-    async def _call_openrouter(self, prompt: str, max_tokens: int, temperature: float) -> str:
-        if not self._openrouter_key:
-            raise ValueError("OPENROUTER_API_KEY not configured")
+    async def _call_gemini(self, prompt: str, max_tokens: int, temperature: float) -> str:
+        """Google Gemini — 2nd provider in the Groq→Gemini→OpenAI→Ollama chain."""
+        if not self._gemini_key:
+            raise ValueError("GEMINI_API_KEY not configured")
 
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(
-                "https://openrouter.ai/api/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {self._openrouter_key}",
-                    "HTTP-Referer": "https://safety-monitor.app",
-                    "X-Title": "Industrial Safety Monitor",
-                    "Content-Type": "application/json",
-                },
+                f"https://generativelanguage.googleapis.com/v1beta/models/{self._gemini_model}:generateContent",
+                params={"key": self._gemini_key},
+                headers={"Content-Type": "application/json"},
                 json={
-                    "model": self._openrouter_model,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": max_tokens,
-                    "temperature": temperature,
+                    "contents": [{"parts": [{"text": prompt}]}],
+                    "generationConfig": {
+                        "maxOutputTokens": max_tokens,
+                        "temperature": temperature,
+                    },
                 },
             )
             resp.raise_for_status()
-            return resp.json()["choices"][0]["message"]["content"]
+            candidates = resp.json().get("candidates", [])
+            if not candidates:
+                raise ValueError("Gemini returned no candidates")
+            return candidates[0]["content"]["parts"][0]["text"]
 
     async def _call_openai(self, prompt: str, max_tokens: int, temperature: float) -> str:
         if not self._openai_key:
@@ -336,17 +344,26 @@ Be concise and professional."""
     def get_status(self) -> dict:
         """Return which providers are configured (for health endpoint)."""
         return {
-            "groq":       bool(self._groq_key),
-            "openrouter": bool(self._openrouter_key),
-            "openai":     bool(self._openai_key),
-            "ollama":     True,  # always try
-            "template":   True,  # always available
+            "chain": "groq → gemini → openai → ollama → template",
+            "groq":     bool(self._groq_key),
+            "gemini":   bool(self._gemini_key),
+            "openai":   bool(self._openai_key),
+            "ollama":   True,   # always try
+            "template": True,   # always available
             "active_model": (
-                self._groq_model if self._groq_key
-                else self._openrouter_model if self._openrouter_key
+                self._groq_model   if self._groq_key
+                else self._gemini_model if self._gemini_key
                 else self._openai_model if self._openai_key
                 else self._ollama_model
             ),
+            "cost_tracker": self._cost_tracker,
+        }
+
+    def get_cost_summary(self) -> dict:
+        """Return estimated token usage per provider for cost tracking."""
+        return {
+            provider: {"estimated_tokens": tokens}
+            for provider, tokens in self._cost_tracker.items()
         }
 
 

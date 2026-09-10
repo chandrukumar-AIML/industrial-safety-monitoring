@@ -249,3 +249,7 @@ Thumbs.db
 
 # Docker
 .docker/
+
+# Load test results (CSV/HTML from locust)
+results/*.csv
+results/*.html
