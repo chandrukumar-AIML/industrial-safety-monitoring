@@ -99,7 +99,7 @@ def _is_shift_active(start_str: str, end_str: str) -> bool:
 async def create_shift(
     body: ShiftCreateRequest,
     session: AsyncSession = Depends(get_session),
-    _: None = Depends(require_role(Role.MANAGER)),
+    _: None = Depends(require_role(Role.SUPERVISOR)),
 ) -> dict:
     """Create a new shift template."""
     result = await session.execute(
@@ -204,7 +204,7 @@ async def update_shift(
     shift_id: int,
     body: ShiftCreateRequest,
     session: AsyncSession = Depends(get_session),
-    _: None = Depends(require_role(Role.MANAGER)),
+    _: None = Depends(require_role(Role.SUPERVISOR)),
 ) -> dict:
     """Update shift configuration."""
     result = await session.execute(
@@ -251,7 +251,7 @@ async def update_shift(
 async def delete_shift(
     shift_id: int,
     session: AsyncSession = Depends(get_session),
-    _: None = Depends(require_role(Role.MANAGER)),
+    _: None = Depends(require_role(Role.SUPERVISOR)),
 ):
     """Remove a shift template."""
     result = await session.execute(
@@ -318,7 +318,7 @@ async def shift_stats(
 async def assign_workers(
     body: ShiftAssignRequest,
     session: AsyncSession = Depends(get_session),
-    _: None = Depends(require_role(Role.MANAGER)),
+    _: None = Depends(require_role(Role.SUPERVISOR)),
 ) -> dict:
     """Assign workers to a shift (upsert)."""
     # Verify shift exists

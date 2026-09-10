@@ -169,7 +169,7 @@ async def update_site(
     site_id: str,
     body: SiteCreateRequest,
     session: AsyncSession = Depends(get_session),
-    _: None = Depends(require_role(Role.MANAGER)),
+    _: None = Depends(require_role(Role.SUPERVISOR)),
 ) -> dict:
     """Update site configuration."""
     result = await session.execute(

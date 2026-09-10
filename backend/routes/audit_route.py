@@ -151,7 +151,7 @@ async def list_audit_log(
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(get_session),
-    _: None = Depends(require_role(Role.MANAGER)),
+    _: None = Depends(require_role(Role.SUPERVISOR)),
 ) -> list:
     """Paginated, filterable audit log. Requires manager role or above."""
     conditions = []
@@ -214,7 +214,7 @@ async def list_audit_log(
 async def audit_stats(
     days: int = Query(default=30, ge=1, le=365),
     session: AsyncSession = Depends(get_session),
-    _: None = Depends(require_role(Role.MANAGER)),
+    _: None = Depends(require_role(Role.SUPERVISOR)),
 ) -> dict:
     """Audit action counts grouped by type (last N days)."""
     result = await session.execute(
