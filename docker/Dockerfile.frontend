@@ -33,14 +33,11 @@ RUN npm run build
 # ── Stage 2: Nginx runtime ────────────────────────────────────
 FROM --platform=linux/amd64 nginx:1.25-alpine AS runtime
 
-# Security: Run as non-root user (nginx user in alpine)
-# The nginx:alpine image already has a 'nginx' user with uid 101
-USER nginx
-
-WORKDIR /usr/share/nginx/html
-
-# Remove default nginx config
-RUN rm -f /etc/nginx/conf.d/default.conf
+# Do privileged file ops as root before dropping to nginx user
+RUN rm -f /etc/nginx/conf.d/default.conf \
+    && sed -i 's/server_tokens on;/server_tokens off;/' /etc/nginx/nginx.conf \
+    && mkdir -p /usr/share/nginx/html \
+    && chown -R nginx:nginx /usr/share/nginx/html /etc/nginx/conf.d
 
 # Copy our nginx config with proper ownership
 COPY --chown=nginx:nginx docker/nginx.conf /etc/nginx/conf.d/app.conf
@@ -48,11 +45,13 @@ COPY --chown=nginx:nginx docker/nginx.conf /etc/nginx/conf.d/app.conf
 # Copy built React app with proper ownership
 COPY --from=builder --chown=nginx:nginx /app/dist /usr/share/nginx/html
 
-# Create health check file
+# Create health check file (still as root, html dir is nginx-owned)
 RUN echo "ok" > /usr/share/nginx/html/health.txt
 
-# Security: Disable server tokens to hide nginx version
-RUN sed -i 's/server_tokens on;/server_tokens off;/' /etc/nginx/nginx.conf
+# Security: Run as non-root user (nginx user in alpine, uid 101)
+USER nginx
+
+WORKDIR /usr/share/nginx/html
 
 # FIXED: run Nginx as non-root user (uid 101 = nginx in nginx:alpine).
 # Default nginx:alpine runs master process as root. If Nginx is compromised,
