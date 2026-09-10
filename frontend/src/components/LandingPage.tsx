@@ -124,7 +124,7 @@ function HeroMockup() {
           </div>
         </div>
       </div>
-      <p className="text-center text-slate-600 text-xs mt-3">Live demo · synthetic data · no signup required</p>
+      <p className="text-center text-slate-600 text-xs mt-3">Live demo · synthetic data · no camera or GPU needed</p>
     </div>
   )
 }
@@ -168,7 +168,7 @@ export default function LandingPage() {
           </div>
           {/* Stat strip */}
           <div className="grid grid-cols-3 gap-6 max-w-2xl mx-auto mt-16">
-            {[['8', 'Industries'], ['60+', 'API Endpoints'], ['99.2%', 'mAP Accuracy']].map(([n, l]) => (
+            {[['8', 'Industries'], ['60+', 'API Endpoints'], ['86.6%', 'mAP@0.5']].map(([n, l]) => (
               <div key={l}>
                 <div className="text-3xl md:text-4xl font-black text-brand-500">{n}</div>
                 <div className="text-slate-500 text-sm mt-1">{l}</div>
@@ -304,7 +304,7 @@ export default function LandingPage() {
               Ready to make your site safer?
             </h2>
             <p className="text-slate-800 mb-8 text-lg">
-              See the full platform live with demo data — no camera or signup needed.
+              See the full platform live with demo data — no camera or GPU needed.
             </p>
             <button
               onClick={() => navigate('/login')}

@@ -67,7 +67,7 @@ moment it appears, on the cameras you already own.*
 | RAG | LangChain 0.2 + ChromaDB 0.5 | Safety document Q&A chatbot |
 | Explainability | SHAP 0.45 | Detection saliency maps |
 | MLOps | MLflow | Model registry + canary deployment traffic splitting |
-| API | FastAPI 0.111 + Pydantic v2 | 39 REST endpoints with OpenAPI docs |
+| API | FastAPI 0.111 + Pydantic v2 | 60+ REST endpoints with OpenAPI docs |
 | ORM | SQLModel + aiosqlite / PostgreSQL | Async database layer |
 | Auth | Bearer token + RBAC | 4 roles: viewer / worker / supervisor / admin |
 | Frontend | React 19 + TypeScript + Vite 8 | 12-tab dashboard, Framer Motion, dark #080808/#6366F1 |
@@ -106,7 +106,7 @@ moment it appears, on the cameras you already own.*
            ▼                ▼
 ┌──────────────────┐ ┌──────────────────────────────────────────┐
 │  FASTAPI BACKEND │ │  ALERTS (multi-channel)                  │
-│  39 endpoints    │ │  Email · WhatsApp · Slack · JIRA webhook │
+│  60+ endpoints   │ │  Email · WhatsApp · Slack · JIRA webhook │
 │  4-role RBAC     │ │  L1→L4 escalation matrix                 │
 │  Pydantic v2     │ │                                          │
 │  ISO 45001 audit │ └──────────────────────────────────────────┘
@@ -133,7 +133,7 @@ flowchart TD
 
     AGENT["🤖 LangGraph 8-Node Agent\nDetect → History → Score → Alert Level\n→ Report → Send → Log → Compliance\nLLM chain: Groq → Gemini → OpenAI → Ollama → Template"]
 
-    subgraph BACKEND["FastAPI Backend (39 endpoints)"]
+    subgraph BACKEND["FastAPI Backend (60+ endpoints)"]
         API["4-role RBAC · Pydantic v2\nISO 45001 Audit Log · Razorpay Billing"]
         DB[("PostgreSQL\nSQLModel async ORM")]
         MLFLOW["MLflow\nModel Registry · Canary Deploy"]
@@ -183,7 +183,7 @@ industrial-safety-monitoring/
 │   ├── rag/                  # ChromaDB + LangChain knowledge base
 │   ├── reports/              # Weekly compliance PDF report generator
 │   ├── webhooks/             # Outbound webhook dispatcher (Slack/Teams/JIRA)
-│   └── routes/               # 24 FastAPI route files → 39 endpoints total
+│   └── routes/               # 33 FastAPI route files → 60+ endpoints total
 │
 ├── frontend/
 │   └── src/components/       # 26 React components (12-tab dashboard)
@@ -534,7 +534,7 @@ Every production system has boundaries. Here are SafeGuardAI's current ones — 
 - [x] SHAP explainability endpoint
 - [x] MLflow model registry + canary deployment
 - [x] RAG safety chatbot (LangChain + ChromaDB)
-- [x] 39 REST API endpoints + React dashboard
+- [x] 60+ REST API endpoints + React dashboard
 - [x] OSHA/ISO 45001 audit log
 - [x] Docker + Railway deploy configs
 - [ ] Train domain-specific YOLOv8 model on manufacturing dataset
