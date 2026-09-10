@@ -16,33 +16,39 @@ from __future__ import annotations
 import io
 import os
 import pathlib
-import re
-from datetime import date, datetime, timezone
-from typing import Any, Dict, List, Optional
+from datetime import date
+from typing import Any
 
 import matplotlib
+
 matplotlib.use("Agg")  # non-interactive backend
 import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
 import numpy as np
-
+from loguru import logger
 from reportlab.lib import colors
+from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import cm
 from reportlab.platypus import (
-    SimpleDocTemplate, Paragraph, Spacer,
-    Table, TableStyle, HRFlowable,
-    Image, KeepTogether,
+    HRFlowable,
+    Image,
+    Paragraph,
+    SimpleDocTemplate,
+    Spacer,
+    Table,
+    TableStyle,
 )
-from reportlab.lib.enums import TA_CENTER, TA_LEFT
-from loguru import logger
 
 # ── Config: Load from env with validation ─────────────────────
 OUTPUT_DIR = pathlib.Path(os.getenv("WEEKLY_REPORT_OUTPUT_DIR", "./reports/weekly"))
 
 # Security: restrict output directory
-ALLOWED_OUTPUT_DIRS = [pathlib.Path(d).resolve() for d in os.getenv("ALLOWED_REPORT_DIRS", "./reports").split(",") if d.strip()]
+ALLOWED_OUTPUT_DIRS = [
+    pathlib.Path(d).resolve()
+    for d in os.getenv("ALLOWED_REPORT_DIRS", "./reports").split(",")
+    if d.strip()
+]
 if not any(str(OUTPUT_DIR.resolve()).startswith(str(d)) for d in ALLOWED_OUTPUT_DIRS):
     logger.warning("WEEKLY_REPORT_OUTPUT_DIR not in allowed directories — using default")
     OUTPUT_DIR = pathlib.Path("./reports/weekly").resolve()
@@ -76,7 +82,7 @@ def _redact_path(path: str) -> str:
 
 
 # ── Helper: Build styles ─────────────────────────────────────
-def _build_styles() -> Dict[str, ParagraphStyle]:
+def _build_styles() -> dict[str, ParagraphStyle]:
     """Build custom paragraph styles."""
     base = getSampleStyleSheet()
     return {
@@ -129,17 +135,14 @@ def _build_styles() -> Dict[str, ParagraphStyle]:
 
 
 # ── Chart generators ──────────────────────────────────────────
-def _make_violation_bar_chart(by_class: List[Dict[str, Any]]) -> io.BytesIO:
+def _make_violation_bar_chart(by_class: list[dict[str, Any]]) -> io.BytesIO:
     """Horizontal bar chart of violations by PPE class."""
     if not by_class:
         by_class = [{"class_name": "no data", "count": 0}]
 
     names = [d["class_name"].replace("no ", "No ") for d in by_class[:8]]
     counts = [d["count"] for d in by_class[:8]]
-    colors_bar = [
-        "#dc2626" if c >= 10 else "#ea580c" if c >= 5 else "#2563eb"
-        for c in counts
-    ]
+    colors_bar = ["#dc2626" if c >= 10 else "#ea580c" if c >= 5 else "#2563eb" for c in counts]
 
     fig, ax = plt.subplots(figsize=(7, max(3, len(names) * 0.5)))
     fig.patch.set_facecolor("#0f172a")
@@ -153,20 +156,23 @@ def _make_violation_bar_chart(by_class: List[Dict[str, Any]]) -> io.BytesIO:
 
     for bar, count in zip(bars, counts):
         ax.text(
-            bar.get_width() + 0.3, bar.get_y() + bar.get_height() / 2,
-            str(count), va="center", color="#f1f5f9", fontsize=8,
+            bar.get_width() + 0.3,
+            bar.get_y() + bar.get_height() / 2,
+            str(count),
+            va="center",
+            color="#f1f5f9",
+            fontsize=8,
         )
 
     plt.tight_layout()
     buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=150, bbox_inches="tight",
-                facecolor="#0f172a")
+    fig.savefig(buf, format="png", dpi=150, bbox_inches="tight", facecolor="#0f172a")
     plt.close(fig)  # Important: free memory
     buf.seek(0)
     return buf
 
 
-def _make_trend_line_chart(daily_trend: List[Dict[str, Any]], week_start: str) -> io.BytesIO:
+def _make_trend_line_chart(daily_trend: list[dict[str, Any]], week_start: str) -> io.BytesIO:
     """Line chart of daily violation count across the week."""
     from datetime import timedelta
 
@@ -181,15 +187,21 @@ def _make_trend_line_chart(daily_trend: List[Dict[str, Any]], week_start: str) -
     fig.patch.set_facecolor("#0f172a")
     ax.set_facecolor("#1e293b")
 
-    ax.plot(labels, counts, color="#2563eb", linewidth=2.5,
-            marker="o", markersize=6, markerfacecolor="#fff")
+    ax.plot(
+        labels,
+        counts,
+        color="#2563eb",
+        linewidth=2.5,
+        marker="o",
+        markersize=6,
+        markerfacecolor="#fff",
+    )
     ax.fill_between(labels, counts, alpha=0.15, color="#2563eb")
 
     # Highlight max day
     if counts:
         max_idx = counts.index(max(counts))
-        ax.plot(labels[max_idx], counts[max_idx], "o",
-                color="#dc2626", markersize=9, zorder=5)
+        ax.plot(labels[max_idx], counts[max_idx], "o", color="#dc2626", markersize=9, zorder=5)
 
     ax.set_ylabel("Violations", color="#94a3b8", fontsize=9)
     ax.tick_params(colors="#94a3b8", labelsize=8)
@@ -199,8 +211,7 @@ def _make_trend_line_chart(daily_trend: List[Dict[str, Any]], week_start: str) -
 
     plt.tight_layout()
     buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=150, bbox_inches="tight",
-                facecolor="#0f172a")
+    fig.savefig(buf, format="png", dpi=150, bbox_inches="tight", facecolor="#0f172a")
     plt.close(fig)  # Important: free memory
     buf.seek(0)
     return buf
@@ -208,25 +219,20 @@ def _make_trend_line_chart(daily_trend: List[Dict[str, Any]], week_start: str) -
 
 def _make_score_gauge(score: float) -> io.BytesIO:
     """Semi-circular gauge showing site compliance score."""
-    fig, ax = plt.subplots(figsize=(4, 2.5),
-                           subplot_kw={"projection": "polar"})
+    fig, ax = plt.subplots(figsize=(4, 2.5), subplot_kw={"projection": "polar"})
     fig.patch.set_facecolor("#0f172a")
     ax.set_facecolor("#0f172a")
 
     # Background arc
     theta_range = np.linspace(np.pi, 0, 100)
-    ax.plot(theta_range, [1]*100, color="#334155", linewidth=16, alpha=0.5)
+    ax.plot(theta_range, [1] * 100, color="#334155", linewidth=16, alpha=0.5)
 
     # Score arc
     fill_frac = score / 100.0
     fill_end = np.pi - fill_frac * np.pi
     theta_fill = np.linspace(np.pi, fill_end, 100)
-    arc_color = (
-        "#22c55e" if score >= 80
-        else "#ea580c" if score >= 60
-        else "#dc2626"
-    )
-    ax.plot(theta_fill, [1]*100, color=arc_color, linewidth=16)
+    arc_color = "#22c55e" if score >= 80 else "#ea580c" if score >= 60 else "#dc2626"
+    ax.plot(theta_fill, [1] * 100, color=arc_color, linewidth=16)
 
     ax.set_ylim(0, 1.5)
     ax.set_theta_zero_location("E")
@@ -234,22 +240,30 @@ def _make_score_gauge(score: float) -> io.BytesIO:
     ax.set_axis_off()
 
     ax.text(
-        0, -0.3, f"{score:.1f}",
-        ha="center", va="center",
-        fontsize=28, fontweight="bold", color=arc_color,
+        0,
+        -0.3,
+        f"{score:.1f}",
+        ha="center",
+        va="center",
+        fontsize=28,
+        fontweight="bold",
+        color=arc_color,
         transform=ax.transData,
     )
     ax.text(
-        0, -0.65, "COMPLIANCE SCORE",
-        ha="center", va="center",
-        fontsize=8, color="#94a3b8",
+        0,
+        -0.65,
+        "COMPLIANCE SCORE",
+        ha="center",
+        va="center",
+        fontsize=8,
+        color="#94a3b8",
         transform=ax.transData,
     )
 
     plt.tight_layout()
     buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=150, bbox_inches="tight",
-                facecolor="#0f172a")
+    fig.savefig(buf, format="png", dpi=150, bbox_inches="tight", facecolor="#0f172a")
     plt.close(fig)  # Important: free memory
     buf.seek(0)
     return buf
@@ -260,7 +274,7 @@ def _kpi_cell(
     value: str,
     sub: str,
     positive: bool,
-    styles: Dict[str, ParagraphStyle],
+    styles: dict[str, ParagraphStyle],
 ) -> Paragraph:
     """Build a KPI summary cell as nested Paragraphs."""
     color = "#16a34a" if positive else "#dc2626"
@@ -278,16 +292,16 @@ def _kpi_cell(
 
 # ── PDF builder ───────────────────────────────────────────────
 def build_weekly_pdf(
-    data: Dict[str, Any],
+    data: dict[str, Any],
     summary: str,
     report_id: int,
 ) -> pathlib.Path:
     """
     Build the full weekly compliance PDF.
-    
+
     # FIXED: Secure file handling with path validation
     # IMPROVED: Memory-efficient chart generation with proper cleanup
-    
+
     Args:
         data: Aggregated weekly data from weekly_report.py.
         summary: LLM executive summary text.
@@ -295,7 +309,7 @@ def build_weekly_pdf(
 
     Returns:
         Path to generated PDF.
-        
+
     Raises:
         ValueError: If inputs are invalid.
         OSError: If file write fails.
@@ -308,10 +322,10 @@ def build_weekly_pdf(
     if not summary or len(summary) < 10:
         logger.warning("summary too short — using placeholder")
         summary = "No executive summary available."
-    
+
     # Ensure output directory exists and is safe
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    
+
     # Build safe filename
     week_start = data.get("week_start", "unknown")
     filename = OUTPUT_DIR / f"weekly_compliance_{week_start}.pdf"
@@ -320,26 +334,24 @@ def build_weekly_pdf(
     doc = SimpleDocTemplate(
         str(filename),
         pagesize=A4,
-        rightMargin=2*cm,
-        leftMargin=2*cm,
-        topMargin=2*cm,
-        bottomMargin=2*cm,
+        rightMargin=2 * cm,
+        leftMargin=2 * cm,
+        topMargin=2 * cm,
+        bottomMargin=2 * cm,
     )
     styles = _build_styles()
     story = []
-    W = A4[0] - 4*cm
+    W = A4[0] - 4 * cm
 
     # ── Cover ─────────────────────────────────────────────────
-    story.append(Paragraph(
-        "INDUSTRIAL SAFETY MONITOR", styles["cover_title"]
-    ))
-    story.append(Paragraph(
-        "Weekly Compliance Report", styles["cover_sub"]
-    ))
-    story.append(Paragraph(
-        f"Week of {data.get('week_start', 'N/A')} to {data.get('week_end', 'N/A')}",
-        styles["cover_date"]
-    ))
+    story.append(Paragraph("INDUSTRIAL SAFETY MONITOR", styles["cover_title"]))
+    story.append(Paragraph("Weekly Compliance Report", styles["cover_sub"]))
+    story.append(
+        Paragraph(
+            f"Week of {data.get('week_start', 'N/A')} to {data.get('week_end', 'N/A')}",
+            styles["cover_date"],
+        )
+    )
     story.append(HRFlowable(width=W, thickness=3, color=_MED_BLUE))
     story.append(Spacer(1, 16))
 
@@ -349,32 +361,58 @@ def build_weekly_pdf(
     viol_delta = data.get("violations_delta", 0)
     viol_str = f"{'▲' if viol_delta>=0 else '▼'} {abs(viol_delta)} vs prior week"
 
-    kpi_data = [[
-        _kpi_cell("Compliance Score", f"{data.get('site_score', 0):.1f}/100",
-                  delta_str, delta >= 0, styles),
-        _kpi_cell("Violations This Week", str(data.get("total_violations_week", 0)),
-                  viol_str, viol_delta <= 0, styles),
-        _kpi_cell("High Risk Workers", str(data.get("high_risk_count", 0)),
-                  "flagged for HR review", True, styles),
-        _kpi_cell("Workers Monitored", str(data.get("worker_count", 0)),
-                  "active profiles", True, styles),
-    ]]
-    kpi_table = Table(kpi_data, colWidths=[W/4]*4)
-    kpi_table.setStyle(TableStyle([
-        ("ALIGN", (0,0), (-1,-1), "CENTER"),
-        ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
-        ("BACKGROUND", (0,0), (-1,-1), _LIGHT_GRAY),
-        ("GRID", (0,0), (-1,-1), 0.5, colors.white),
-        ("TOPPADDING", (0,0), (-1,-1), 10),
-        ("BOTTOMPADDING", (0,0), (-1,-1), 10),
-    ]))
+    kpi_data = [
+        [
+            _kpi_cell(
+                "Compliance Score",
+                f"{data.get('site_score', 0):.1f}/100",
+                delta_str,
+                delta >= 0,
+                styles,
+            ),
+            _kpi_cell(
+                "Violations This Week",
+                str(data.get("total_violations_week", 0)),
+                viol_str,
+                viol_delta <= 0,
+                styles,
+            ),
+            _kpi_cell(
+                "High Risk Workers",
+                str(data.get("high_risk_count", 0)),
+                "flagged for HR review",
+                True,
+                styles,
+            ),
+            _kpi_cell(
+                "Workers Monitored",
+                str(data.get("worker_count", 0)),
+                "active profiles",
+                True,
+                styles,
+            ),
+        ]
+    ]
+    kpi_table = Table(kpi_data, colWidths=[W / 4] * 4)
+    kpi_table.setStyle(
+        TableStyle(
+            [
+                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("BACKGROUND", (0, 0), (-1, -1), _LIGHT_GRAY),
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.white),
+                ("TOPPADDING", (0, 0), (-1, -1), 10),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
+            ]
+        )
+    )
     story.append(kpi_table)
     story.append(Spacer(1, 16))
 
     # ── Compliance gauge chart ────────────────────────────────
     story.append(Paragraph("Site Compliance Score", styles["section"]))
     gauge_buf = _make_score_gauge(data.get("site_score", 0))
-    story.append(Image(gauge_buf, width=W*0.4, height=W*0.25))
+    story.append(Image(gauge_buf, width=W * 0.4, height=W * 0.25))
     story.append(Spacer(1, 12))
 
     # ── Executive Summary (LLM text) ──────────────────────────
@@ -389,16 +427,14 @@ def build_weekly_pdf(
 
     # ── Daily trend chart ─────────────────────────────────────
     story.append(Paragraph("Daily Violation Trend", styles["section"]))
-    trend_buf = _make_trend_line_chart(
-        data.get("daily_trend", []), data.get("week_start", "")
-    )
-    story.append(Image(trend_buf, width=W, height=W*0.35))
+    trend_buf = _make_trend_line_chart(data.get("daily_trend", []), data.get("week_start", ""))
+    story.append(Image(trend_buf, width=W, height=W * 0.35))
     story.append(Spacer(1, 12))
 
     # ── Violation breakdown chart ─────────────────────────────
     story.append(Paragraph("Violations by PPE Category", styles["section"]))
     bar_buf = _make_violation_bar_chart(data.get("by_class", []))
-    story.append(Image(bar_buf, width=W, height=max(W*0.35, 3*cm)))
+    story.append(Image(bar_buf, width=W, height=max(W * 0.35, 3 * cm)))
     story.append(Spacer(1, 12))
 
     # ── High risk workers table ───────────────────────────────
@@ -408,29 +444,35 @@ def build_weekly_pdf(
             ["Worker", "Department", "Risk Level", "Score", "Violations", "HR Alerted"]
         ]
         for w in data["high_risk_workers"]:
-            hr_table_data.append([
-                w.get("full_name", "Unknown"),
-                w.get("department", "—"),
-                w.get("risk_level", "—"),
-                f"{float(w.get('risk_score', 0)):.1f}",
-                str(w.get("violation_count", 0)),
-                "✓" if w.get("hr_alerted") else "✗",
-            ])
+            hr_table_data.append(
+                [
+                    w.get("full_name", "Unknown"),
+                    w.get("department", "—"),
+                    w.get("risk_level", "—"),
+                    f"{float(w.get('risk_score', 0)):.1f}",
+                    str(w.get("violation_count", 0)),
+                    "✓" if w.get("hr_alerted") else "✗",
+                ]
+            )
 
         hr_table = Table(
             hr_table_data,
-            colWidths=[W*0.25, W*0.18, W*0.15, W*0.12, W*0.15, W*0.15],
+            colWidths=[W * 0.25, W * 0.18, W * 0.15, W * 0.12, W * 0.15, W * 0.15],
         )
-        hr_table.setStyle(TableStyle([
-            ("BACKGROUND", (0,0), (-1,0), _DARK_BLUE),
-            ("TEXTCOLOR", (0,0), (-1,0), colors.white),
-            ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
-            ("FONTSIZE", (0,0), (-1,-1), 8),
-            ("ROWBACKGROUNDS", (0,1), (-1,-1), [colors.white, _LIGHT_GRAY]),
-            ("GRID", (0,0), (-1,-1), 0.3, colors.lightgrey),
-            ("TOPPADDING", (0,0), (-1,-1), 5),
-            ("BOTTOMPADDING", (0,0), (-1,-1), 5),
-        ]))
+        hr_table.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), _DARK_BLUE),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTSIZE", (0, 0), (-1, -1), 8),
+                    ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, _LIGHT_GRAY]),
+                    ("GRID", (0, 0), (-1, -1), 0.3, colors.lightgrey),
+                    ("TOPPADDING", (0, 0), (-1, -1), 5),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+                ]
+            )
+        )
         story.append(hr_table)
         story.append(Spacer(1, 12))
 
@@ -444,30 +486,36 @@ def build_weekly_pdf(
         ["Proximity Alerts", str(si.get("proximity", 0))],
         ["Zone Violations", str(data.get("zone_alert_summary", {}).get("total", 0))],
     ]
-    si_table = Table(si_data, colWidths=[W*0.7, W*0.3])
-    si_table.setStyle(TableStyle([
-        ("BACKGROUND", (0,0), (-1,0), _DARK_BLUE),
-        ("TEXTCOLOR", (0,0), (-1,0), colors.white),
-        ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
-        ("FONTSIZE", (0,0), (-1,-1), 9),
-        ("ROWBACKGROUNDS", (0,1), (-1,-1), [colors.white, _LIGHT_GRAY]),
-        ("GRID", (0,0), (-1,-1), 0.3, colors.lightgrey),
-        ("ALIGN", (1,0), (1,-1), "CENTER"),
-        ("TOPPADDING", (0,0), (-1,-1), 6),
-        ("BOTTOMPADDING", (0,0), (-1,-1), 6),
-    ]))
+    si_table = Table(si_data, colWidths=[W * 0.7, W * 0.3])
+    si_table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), _DARK_BLUE),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, -1), 9),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, _LIGHT_GRAY]),
+                ("GRID", (0, 0), (-1, -1), 0.3, colors.lightgrey),
+                ("ALIGN", (1, 0), (1, -1), "CENTER"),
+                ("TOPPADDING", (0, 0), (-1, -1), 6),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ]
+        )
+    )
     story.append(si_table)
     story.append(Spacer(1, 14))
 
     # ── Footer ────────────────────────────────────────────────
     story.append(HRFlowable(width=W, thickness=0.5, color=colors.lightgrey))
     story.append(Spacer(1, 4))
-    story.append(Paragraph(
-        f"Industrial Safety Monitor AI · "
-        f"Weekly Report #{report_id} · "
-        f"Generated {data.get('generated_at', '')[:16].replace('T', ' ')} UTC",
-        styles["footer"],
-    ))
+    story.append(
+        Paragraph(
+            f"Industrial Safety Monitor AI · "
+            f"Weekly Report #{report_id} · "
+            f"Generated {data.get('generated_at', '')[:16].replace('T', ' ')} UTC",
+            styles["footer"],
+        )
+    )
 
     # Build PDF
     try:

@@ -16,21 +16,17 @@ from __future__ import annotations
 
 import asyncio
 import os
-import re
 from contextlib import asynccontextmanager
-from typing import Optional
 
-from fastapi import FastAPI, Request, status, Depends
+from dotenv import load_dotenv
+from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from loguru import logger
-from dotenv import load_dotenv
-from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
+from .database import AsyncSessionLocal, init_db
 from .middleware.rate_limiter import limiter, rate_limit_exceeded_handler
-
-from .database import init_db, AsyncSessionLocal
 from .pipeline import PipelineRuntime, parse_video_source, reload_enabled
 from .state import app_state
 
@@ -39,13 +35,16 @@ load_dotenv()
 
 # ── Environment config with validation ─────────────────────────
 
+
 def _env_float(name: str, default: str, min_val: float = 0.0, max_val: float = 1.0) -> float:
     """Validate and parse float env var with range checking."""
     raw = os.getenv(name, default)
     try:
         val = float(raw)
         if not min_val <= val <= max_val:
-            logger.warning("{}={} outside [{}, {}] — using default {}", name, val, min_val, max_val, default)
+            logger.warning(
+                "{}={} outside [{}, {}] — using default {}", name, val, min_val, max_val, default
+            )
             return float(default)
         return val
     except ValueError:
@@ -59,7 +58,9 @@ def _env_int(name: str, default: str, min_val: int = 1, max_val: int = 100) -> i
     try:
         val = int(raw)
         if not min_val <= val <= max_val:
-            logger.warning("{}={} outside [{}, {}] — using default {}", name, val, min_val, max_val, default)
+            logger.warning(
+                "{}={} outside [{}, {}] — using default {}", name, val, min_val, max_val, default
+            )
             return int(default)
         return val
     except ValueError:
@@ -77,15 +78,11 @@ FRAME_SKIP: int = _env_int("FRAME_SKIP", "1", 1, 100)
 
 # CORS config
 CORS_ORIGINS: list[str] = [
-    o.strip()
-    for o in os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",")
-    if o.strip()
+    o.strip() for o in os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",") if o.strip()
 ]
 
 # SHAP config
-SHAP_BACKGROUND_DIR: str = os.getenv(
-    "SHAP_BACKGROUND_DIR", "data/processed/train/images"
-)
+SHAP_BACKGROUND_DIR: str = os.getenv("SHAP_BACKGROUND_DIR", "data/processed/train/images")
 
 # Auth config
 API_KEY: str = os.getenv("API_KEY", "")
@@ -95,8 +92,13 @@ if API_KEY and len(API_KEY) < 16:
 
 # ── Optional API key + JWT middleware ────────────────────────
 _AUTH_EXCLUDED_PATHS = {
-    "/health", "/docs", "/openapi.json", "/redoc", "/stream",
-    "/auth/login", "/auth/register",
+    "/health",
+    "/docs",
+    "/openapi.json",
+    "/redoc",
+    "/stream",
+    "/auth/login",
+    "/auth/register",
 }
 
 
@@ -108,7 +110,7 @@ async def api_key_middleware(request: Request, call_next) -> JSONResponse:
       - A static API_KEY (legacy / machine-to-machine)
     Disabled when both JWT_SECRET is default AND API_KEY is empty (local dev).
     """
-    from .auth.jwt_utils import decode_access_token, JWT_SECRET
+    from .auth.jwt_utils import JWT_SECRET, decode_access_token
 
     # CORS preflight must always pass through
     if request.method == "OPTIONS":
@@ -167,7 +169,7 @@ async def api_key_middleware(request: Request, call_next) -> JSONResponse:
 
 # ── Lifespan ──────────────────────────────────────────────────
 
-_pipeline_runtime: Optional[PipelineRuntime] = None
+_pipeline_runtime: PipelineRuntime | None = None
 
 
 @asynccontextmanager
@@ -184,40 +186,50 @@ async def lifespan(app: FastAPI):
     global _pipeline_runtime
 
     logger.info("Starting Industrial Safety Monitor API")
-    
+
     # Warn if auth is disabled in production-like environment
     if not API_KEY and os.getenv("ENVIRONMENT", "dev") != "dev":
         logger.warning(
             "API_KEY is empty — authentication is DISABLED. "
             "Set API_KEY in environment before deploying to production."
         )
-    
+
     # Keep startup lightweight: DB init is short, while ML work moves to the
     # dedicated pipeline worker thread below.
     await init_db()
 
     # ── Seed industry PPE profiles (idempotent — skips existing rows) ──
     try:
-        from .routes.industry_ppe_route import INDUSTRY_PPE_SEED
         import json as _json
+
         from sqlalchemy import text as _text
+
+        from .routes.industry_ppe_route import INDUSTRY_PPE_SEED
+
         async with AsyncSessionLocal() as _sess:
             _inserted = 0
             for _p in INDUSTRY_PPE_SEED:
-                _r = await _sess.exec(_text(
-                    "SELECT id FROM industry_ppe_profiles "
-                    "WHERE industry_type=:it AND zone_type=:zt"
-                ).bindparams(it=_p["industry_type"], zt=_p["zone_type"]))
+                _r = await _sess.exec(
+                    _text(
+                        "SELECT id FROM industry_ppe_profiles "
+                        "WHERE industry_type=:it AND zone_type=:zt"
+                    ).bindparams(it=_p["industry_type"], zt=_p["zone_type"])
+                )
                 if not _r.fetchone():
-                    await _sess.exec(_text("""
+                    await _sess.exec(
+                        _text("""
                         INSERT INTO industry_ppe_profiles
                             (industry_type,zone_type,required_ppe,risk_level,compliance_standard,notes)
                         VALUES (:it,:zt,:rp,:rl,:cs,:n)
                     """).bindparams(
-                        it=_p["industry_type"], zt=_p["zone_type"],
-                        rp=_json.dumps(_p["required_ppe"]), rl=_p["risk_level"],
-                        cs=_p["compliance_standard"], n=_p.get("notes"),
-                    ))
+                            it=_p["industry_type"],
+                            zt=_p["zone_type"],
+                            rp=_json.dumps(_p["required_ppe"]),
+                            rl=_p["risk_level"],
+                            cs=_p["compliance_standard"],
+                            n=_p.get("notes"),
+                        )
+                    )
                     _inserted += 1
             await _sess.commit()
         if _inserted:
@@ -232,12 +244,14 @@ async def lifespan(app: FastAPI):
     if os.getenv("DEMO_MODE", "false").lower() == "true":
         try:
             from sqlalchemy import text as _text2
+
             async with AsyncSessionLocal() as _s:
                 _r = await _s.exec(_text2("SELECT COUNT(*) FROM violation_events"))
                 _count = _r.scalar() if hasattr(_r, "scalar") else _r.fetchone()[0]
             if not _count:
                 import importlib.util as _ilu
                 from pathlib import Path as _Path
+
                 _seed_path = _Path(__file__).resolve().parent.parent / "scripts" / "demo_seed.py"
                 if _seed_path.exists():
                     _spec = _ilu.spec_from_file_location("demo_seed", _seed_path)
@@ -254,6 +268,7 @@ async def lifespan(app: FastAPI):
     _scheduler = None
     try:
         from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
         from .routes.escalation_route import run_escalation_check
 
         async def _escalation_job():
@@ -263,9 +278,7 @@ async def lifespan(app: FastAPI):
                     result = await run_escalation_check(_s)
                     await _s.commit()
                     if result["escalated"] > 0:
-                        logger.warning(
-                            "APScheduler: escalated {} alert(s)", result["escalated"]
-                        )
+                        logger.warning("APScheduler: escalated {} alert(s)", result["escalated"])
             except Exception as _ex:
                 logger.warning("Escalation job error: {}", str(_ex)[:80])
 
@@ -284,7 +297,7 @@ async def lifespan(app: FastAPI):
         logger.warning("APScheduler failed to start (non-critical): {}", str(_e)[:80])
 
     video_src = parse_video_source(VIDEO_SOURCE)
-    
+
     # Update app state config
     app_state.model_path = MODEL_PATH
     app_state.device = DEVICE
@@ -303,8 +316,9 @@ async def lifespan(app: FastAPI):
     app_state.set_pipeline_runtime(_pipeline_runtime)
     _pipeline_runtime.start()
 
-    logger.info("API startup complete | auth={} | device={}", 
-                "enabled" if API_KEY else "disabled", DEVICE)
+    logger.info(
+        "API startup complete | auth={} | device={}", "enabled" if API_KEY else "disabled", DEVICE
+    )
 
     yield
 
@@ -326,24 +340,60 @@ async def lifespan(app: FastAPI):
 
 _OPENAPI_TAGS = [
     {"name": "system", "description": "System health and pipeline status"},
-    {"name": "detections", "description": "Violation event log, live detections, and acknowledgement"},
+    {
+        "name": "detections",
+        "description": "Violation event log, live detections, and acknowledgement",
+    },
     {"name": "stream", "description": "WebSocket video stream and connection statistics"},
     {"name": "heatmap", "description": "Violation density heatmap image and zone risk scores"},
-    {"name": "explainability", "description": "On-demand SHAP saliency explanations for detections"},
+    {
+        "name": "explainability",
+        "description": "On-demand SHAP saliency explanations for detections",
+    },
     {"name": "chatbot", "description": "RAG-powered safety Q&A chatbot"},
-    {"name": "demo", "description": "Demo mode — synthetic data for portfolio/trade show presentations"},
+    {
+        "name": "demo",
+        "description": "Demo mode — synthetic data for portfolio/trade show presentations",
+    },
     {"name": "export", "description": "CSV/JSON data export for compliance reporting and audits"},
-    {"name": "webhooks", "description": "Outbound webhook management — Slack, Teams, JIRA, custom endpoints"},
-    {"name": "sites", "description": "Multi-site management — register and compare physical locations"},
+    {
+        "name": "webhooks",
+        "description": "Outbound webhook management — Slack, Teams, JIRA, custom endpoints",
+    },
+    {
+        "name": "sites",
+        "description": "Multi-site management — register and compare physical locations",
+    },
     {"name": "shifts", "description": "Shift schedule management and per-shift safety analytics"},
     {"name": "api-keys", "description": "API key provisioning and RBAC management"},
-    {"name": "audit", "description": "Immutable audit trail — all safety-critical actions logged (OSHA/ISO 45001)"},
-    {"name": "organizations", "description": "Multi-tenant org management — create, activate, suspend client accounts"},
-    {"name": "billing", "description": "Subscription billing — Razorpay India, plan management, webhook events"},
-    {"name": "industry-ppe", "description": "Industry-specific PPE profiles — construction, steel, oil & gas, pharma, mining"},
-    {"name": "escalation", "description": "Alert escalation matrix — L1 (supervisor) → L4 (emergency) with auto-escalation"},
-    {"name": "permits", "description": "Digital permit-to-work system — hot work, confined space, electrical LOTO"},
-    {"name": "attendance", "description": "Worker attendance & headcount — check-in/out, muster drill, overtime alerts"},
+    {
+        "name": "audit",
+        "description": "Immutable audit trail — all safety-critical actions logged (OSHA/ISO 45001)",
+    },
+    {
+        "name": "organizations",
+        "description": "Multi-tenant org management — create, activate, suspend client accounts",
+    },
+    {
+        "name": "billing",
+        "description": "Subscription billing — Razorpay India, plan management, webhook events",
+    },
+    {
+        "name": "industry-ppe",
+        "description": "Industry-specific PPE profiles — construction, steel, oil & gas, pharma, mining",
+    },
+    {
+        "name": "escalation",
+        "description": "Alert escalation matrix — L1 (supervisor) → L4 (emergency) with auto-escalation",
+    },
+    {
+        "name": "permits",
+        "description": "Digital permit-to-work system — hot work, confined space, electrical LOTO",
+    },
+    {
+        "name": "attendance",
+        "description": "Worker attendance & headcount — check-in/out, muster drill, overtime alerts",
+    },
 ]
 
 
@@ -389,6 +439,7 @@ def create_app() -> FastAPI:
 
     # Multi-tenant middleware — resolves X-Org-ID → request.state.org_id
     from .middleware.tenant import TenantMiddleware
+
     app.add_middleware(TenantMiddleware)
 
     # FIXED: Re-enabled auth middleware — was commented out, leaving all routes unprotected
@@ -398,22 +449,40 @@ def create_app() -> FastAPI:
 
     # Register routers
     from .routes import (
-        health, detections, stream, heatmap, shap_route, chat,
-        agent_route, alert_config_route, cameras_route,
-        enhancement_route, fire_route, mlops_route,
-        pose_hazards, proximity_route, reports_route,
-        weekly_report_route, workers_route, zones_route,
-        demo_route, export_route, webhooks_route,
-        sites_route, shifts_route, apikeys_route,
+        agent_route,
+        alert_config_route,
+        apikeys_route,
         audit_route,
+        cameras_route,
+        chat,
+        demo_route,
+        detections,
+        enhancement_route,
+        export_route,
+        fire_route,
+        health,
+        heatmap,
+        mlops_route,
+        pose_hazards,
+        proximity_route,
+        reports_route,
+        shap_route,
+        shifts_route,
+        sites_route,
+        stream,
+        webhooks_route,
+        weekly_report_route,
+        workers_route,
+        zones_route,
     )
+    from .routes.attendance_route import router as attendance_router
+    from .routes.billing_route import router as billing_router
+    from .routes.escalation_route import router as escalation_router
+    from .routes.industry_ppe_route import router as industry_ppe_router
+
     # Enterprise feature routers
     from .routes.organizations_route import router as organizations_router
-    from .routes.billing_route import router as billing_router
-    from .routes.industry_ppe_route import router as industry_ppe_router
-    from .routes.escalation_route import router as escalation_router
     from .routes.permit_route import router as permit_router
-    from .routes.attendance_route import router as attendance_router
 
     app.include_router(health.router)
     app.include_router(detections.router)
@@ -450,6 +519,7 @@ def create_app() -> FastAPI:
     app.include_router(attendance_router)
     # Auth router (JWT login / register / me)
     from .routes.auth_route import router as auth_router
+
     app.include_router(auth_router)
 
     return app

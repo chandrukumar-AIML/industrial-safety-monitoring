@@ -24,7 +24,7 @@ import asyncio
 import os
 import threading
 from concurrent.futures import Future
-from typing import Any, Optional
+from typing import Any
 
 from loguru import logger
 
@@ -57,9 +57,9 @@ class PipelineRuntime:
         self._shap_background_dir = shap_background_dir
         self._app_state = app_state
 
-        self._thread: Optional[threading.Thread] = None
+        self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
-        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._loop: asyncio.AbstractEventLoop | None = None
         self._ready = threading.Event()
 
     def start(self) -> None:
@@ -117,20 +117,21 @@ class PipelineRuntime:
         # cloud/demo deploy it isn't installed — detect that cleanly and skip
         # live inference instead of crashing the thread with a stack trace.
         try:
-            from .inference.pipeline import InferencePipeline
             from .inference.explainer import SHAPExplainer
+            from .inference.pipeline import InferencePipeline
         except ImportError as exc:
             logger.info(
                 "Live inference disabled — ML stack not installed ({}). "
                 "Running in API/demo mode (synthetic data). This is expected on "
-                "slim cloud deploys.", str(exc),
+                "slim cloud deploys.",
+                str(exc),
             )
             self._ready.set()  # unblock anything waiting on pipeline readiness
             return
 
-        pipeline: Optional[InferencePipeline] = None
-        event_writer_task: Optional[asyncio.Task] = None
-        shap_task: Optional[asyncio.Task] = None
+        pipeline: InferencePipeline | None = None
+        event_writer_task: asyncio.Task | None = None
+        shap_task: asyncio.Task | None = None
 
         try:
             logger.info(
@@ -270,13 +271,21 @@ class PipelineRuntime:
 
     async def get_fire_heatmap_png_bytes(self) -> bytes:
         pipeline = self._app_state.get_pipeline()
-        if pipeline is None or not hasattr(pipeline, "_fire_detector") or pipeline._fire_detector is None:
+        if (
+            pipeline is None
+            or not hasattr(pipeline, "_fire_detector")
+            or pipeline._fire_detector is None
+        ):
             return b""
         return await self.call(pipeline._fire_detector.heatmap.get_png_bytes)
 
     async def reset_fire_heatmap(self) -> bool:
         pipeline = self._app_state.get_pipeline()
-        if pipeline is None or not hasattr(pipeline, "_fire_detector") or pipeline._fire_detector is None:
+        if (
+            pipeline is None
+            or not hasattr(pipeline, "_fire_detector")
+            or pipeline._fire_detector is None
+        ):
             return False
         await self.call(pipeline._fire_detector.heatmap.reset)
         return True

@@ -14,26 +14,28 @@ LLM is called in weekly_pdf_builder for the executive summary.
 
 from __future__ import annotations
 
-import json
-from datetime import date, datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
+from datetime import UTC, date, datetime, timedelta
+from typing import Any, Protocol, runtime_checkable
 
 from loguru import logger
 from pydantic import BaseModel, Field, field_validator  # FIXED: Pydantic v2 compatibility
+
 
 # ── Protocol for dependency injection ─────────────────────────
 @runtime_checkable
 class DBFactoryProtocol(Protocol):
     """Protocol for async session factory — enables mocking in tests."""
+
     def __call__(self): ...
 
 
 # ── Pydantic models for structured validation ─────────────────
 class WeeklyReportConfig(BaseModel):
     """Validated configuration for weekly report aggregation."""
+
     max_workers: int = Field(default=1000, ge=100, le=10000)
     max_violations: int = Field(default=10000, ge=1000, le=100000)
-    
+
     @field_validator("max_workers")
     @classmethod
     def warn_on_large_limit(cls, v):
@@ -42,7 +44,7 @@ class WeeklyReportConfig(BaseModel):
         return v
 
 
-def _week_bounds(reference_date: Optional[date] = None) -> tuple[date, date]:
+def _week_bounds(reference_date: date | None = None) -> tuple[date, date]:
     """Return (Monday, Sunday) of the week containing reference_date."""
     ref = reference_date or date.today()
     start = ref - timedelta(days=ref.weekday())  # Monday
@@ -50,7 +52,7 @@ def _week_bounds(reference_date: Optional[date] = None) -> tuple[date, date]:
     return start, end
 
 
-def _prev_week_bounds(reference_date: Optional[date] = None) -> tuple[date, date]:
+def _prev_week_bounds(reference_date: date | None = None) -> tuple[date, date]:
     """Return (Monday, Sunday) of the previous week."""
     ref = reference_date or date.today()
     start = ref - timedelta(days=ref.weekday() + 7)
@@ -60,16 +62,16 @@ def _prev_week_bounds(reference_date: Optional[date] = None) -> tuple[date, date
 
 async def aggregate_weekly_data(
     db_factory: DBFactoryProtocol,
-    reference_date: Optional[date] = None,
-    config: Optional[WeeklyReportConfig] = None,
-) -> Dict[str, Any]:
+    reference_date: date | None = None,
+    config: WeeklyReportConfig | None = None,
+) -> dict[str, Any]:
     """
     Collect all metrics for the weekly compliance report.
-    
+
     # FIXED: Parameterized queries only — no SQL injection
     # IMPROVED: Dependency injection for testability
     # FIXED: No PII leakage in logs
-    
+
     Args:
         db_factory: AsyncSessionLocal factory.
         reference_date: Report covers the week containing this date.
@@ -78,16 +80,16 @@ async def aggregate_weekly_data(
 
     Returns:
         Complete data dict consumed by weekly_pdf_builder.
-        
+
     Raises:
         ValueError: If inputs are invalid.
     """
     cfg = config or WeeklyReportConfig()
-    
+
     # Validate reference_date
     if reference_date and not isinstance(reference_date, date):
         raise ValueError("reference_date must be a date object")
-    
+
     week_start, week_end = _week_bounds(reference_date)
     prev_start, prev_end = _prev_week_bounds(reference_date)
     ws_iso = week_start.isoformat()
@@ -97,29 +99,31 @@ async def aggregate_weekly_data(
 
     logger.info(
         "Aggregating weekly data | week={} → {}",
-        ws_iso, we_iso,
+        ws_iso,
+        we_iso,
     )
 
-    data: Dict[str, Any] = {
+    data: dict[str, Any] = {
         "week_start": ws_iso,
         "week_end": we_iso,
         "report_date": date.today().isoformat(),
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
     }
 
     from sqlalchemy import text
 
     async with db_factory() as session:
-
         # ── 1. Site compliance score (average of all workers) ─
-        score_r = await session.execute(text("""
+        score_r = await session.execute(
+            text("""
             SELECT
                 AVG(score) as avg_score,
                 MIN(score) as min_score,
                 MAX(score) as max_score,
                 COUNT(*) as worker_count
             FROM worker_compliance
-        """))
+        """)
+        )
         score_row = score_r.mappings().first()
         data["site_score"] = round(float(score_row["avg_score"] or 80), 2)
         data["min_score"] = round(float(score_row["min_score"] or 0), 2)
@@ -127,11 +131,14 @@ async def aggregate_weekly_data(
         data["worker_count"] = min(int(score_row["worker_count"] or 0), cfg.max_workers)
 
         # ── 2. Previous week score for delta ──────────────────
-        prev_score_r = await session.execute(text("""
+        prev_score_r = await session.execute(
+            text("""
             SELECT AVG(risk_score) as avg_risk
             FROM worker_risk_history
             WHERE computed_at BETWEEN :ps AND :pe
-        """), {"ps": ps_iso, "pe": pe_iso})
+        """),
+            {"ps": ps_iso, "pe": pe_iso},
+        )
         prev_row = prev_score_r.mappings().first()
         prev_val = float(prev_row["avg_risk"] or 0) if prev_row else 0
 
@@ -141,7 +148,8 @@ async def aggregate_weekly_data(
         data["score_delta"] = round(data["site_score"] - prev_compliance, 2)
 
         # ── 3. Total violations this week ─────────────────────
-        total_r = await session.execute(text("""
+        total_r = await session.execute(
+            text("""
             SELECT
                 COUNT(*) as total,
                 COUNT(*) FILTER (
@@ -149,38 +157,42 @@ async def aggregate_weekly_data(
                       AND timestamp <= :we || ' 23:59:59'
                 ) as this_week
             FROM violation_events
-        """), {"ws": ws_iso, "we": we_iso})
+        """),
+            {"ws": ws_iso, "we": we_iso},
+        )
         total_row = total_r.mappings().first()
         data["total_violations_week"] = min(int(total_row["this_week"] or 0), cfg.max_violations)
         data["total_violations_all"] = min(int(total_row["total"] or 0), cfg.max_violations)
 
         # Previous week violations for delta
-        prev_viol_r = await session.execute(text("""
+        prev_viol_r = await session.execute(
+            text("""
             SELECT COUNT(*) as cnt
             FROM violation_events
             WHERE timestamp BETWEEN :ps AND :pe || ' 23:59:59'
-        """), {"ps": ps_iso, "pe": pe_iso})
-        data["prev_violations"] = min(int(prev_viol_r.scalar() or 0), cfg.max_violations)
-        data["violations_delta"] = (
-            data["total_violations_week"] - data["prev_violations"]
+        """),
+            {"ps": ps_iso, "pe": pe_iso},
         )
+        data["prev_violations"] = min(int(prev_viol_r.scalar() or 0), cfg.max_violations)
+        data["violations_delta"] = data["total_violations_week"] - data["prev_violations"]
 
         # ── 4. Violations by class ─────────────────────────────
-        class_r = await session.execute(text("""
+        class_r = await session.execute(
+            text("""
             SELECT class_name, COUNT(*) as cnt
             FROM violation_events
             WHERE timestamp BETWEEN :ws AND :we || ' 23:59:59'
             GROUP BY class_name
             ORDER BY cnt DESC
             LIMIT 20
-        """), {"ws": ws_iso, "we": we_iso})
-        data["by_class"] = [
-            {"class_name": r[0], "count": r[1]}
-            for r in class_r.all()
-        ]
+        """),
+            {"ws": ws_iso, "we": we_iso},
+        )
+        data["by_class"] = [{"class_name": r[0], "count": r[1]} for r in class_r.all()]
 
         # ── 5. Violations by zone ──────────────────────────────
-        zone_r = await session.execute(text("""
+        zone_r = await session.execute(
+            text("""
             SELECT zone_id, COUNT(*) as cnt
             FROM violation_events
             WHERE timestamp BETWEEN :ws AND :we || ' 23:59:59'
@@ -188,14 +200,14 @@ async def aggregate_weekly_data(
             GROUP BY zone_id
             ORDER BY cnt DESC
             LIMIT 10
-        """), {"ws": ws_iso, "we": we_iso})
-        data["by_zone"] = [
-            {"zone_id": r[0], "count": r[1]}
-            for r in zone_r.all()
-        ]
+        """),
+            {"ws": ws_iso, "we": we_iso},
+        )
+        data["by_zone"] = [{"zone_id": r[0], "count": r[1]} for r in zone_r.all()]
 
         # ── 6. Violations by camera ────────────────────────────
-        cam_r = await session.execute(text("""
+        cam_r = await session.execute(
+            text("""
             SELECT camera_id, COUNT(*) as cnt
             FROM worker_violations
             WHERE timestamp BETWEEN :ws AND :we || ' 23:59:59'
@@ -203,14 +215,14 @@ async def aggregate_weekly_data(
             GROUP BY camera_id
             ORDER BY cnt DESC
             LIMIT 5
-        """), {"ws": ws_iso, "we": we_iso})
-        data["by_camera"] = [
-            {"camera_id": r[0], "count": r[1]}
-            for r in cam_r.all()
-        ]
+        """),
+            {"ws": ws_iso, "we": we_iso},
+        )
+        data["by_camera"] = [{"camera_id": r[0], "count": r[1]} for r in cam_r.all()]
 
         # ── 7. Daily trend (violation count per day this week) ─
-        daily_r = await session.execute(text("""
+        daily_r = await session.execute(
+            text("""
             SELECT
                 DATE(timestamp) as day,
                 COUNT(*) as cnt
@@ -218,14 +230,14 @@ async def aggregate_weekly_data(
             WHERE timestamp BETWEEN :ws AND :we || ' 23:59:59'
             GROUP BY DATE(timestamp)
             ORDER BY day
-        """), {"ws": ws_iso, "we": we_iso})
-        data["daily_trend"] = [
-            {"date": str(r[0]), "count": r[1]}
-            for r in daily_r.all()
-        ]
+        """),
+            {"ws": ws_iso, "we": we_iso},
+        )
+        data["daily_trend"] = [{"date": str(r[0]), "count": r[1]} for r in daily_r.all()]
 
         # ── 8. High risk workers ───────────────────────────────
-        hr_r = await session.execute(text("""
+        hr_r = await session.execute(
+            text("""
             SELECT
                 wp.worker_id, wp.full_name, wp.department,
                 wp.risk_score, wp.risk_level, wp.hr_alerted,
@@ -240,14 +252,15 @@ async def aggregate_weekly_data(
                      wp.risk_score, wp.risk_level, wp.hr_alerted
             ORDER BY wp.risk_score DESC
             LIMIT 10
-        """), {"ws": ws_iso, "we": we_iso})
-        data["high_risk_workers"] = [
-            dict(r) for r in hr_r.mappings().all()
-        ]
+        """),
+            {"ws": ws_iso, "we": we_iso},
+        )
+        data["high_risk_workers"] = [dict(r) for r in hr_r.mappings().all()]
         data["high_risk_count"] = len(data["high_risk_workers"])
 
         # ── 9. Inference stats for the week ───────────────────
-        stats_r = await session.execute(text("""
+        stats_r = await session.execute(
+            text("""
             SELECT
                 SUM(total_frames) as frames,
                 SUM(total_detections) as detections,
@@ -256,7 +269,9 @@ async def aggregate_weekly_data(
                 COUNT(*) as days_logged
             FROM inference_stats_daily
             WHERE stat_date BETWEEN :ws AND :we
-        """), {"ws": ws_iso, "we": we_iso})
+        """),
+            {"ws": ws_iso, "we": we_iso},
+        )
         stats_row = stats_r.mappings().first()
         data["inference_stats"] = {
             "total_frames": min(int(stats_row["frames"] or 0), cfg.max_violations),
@@ -267,14 +282,17 @@ async def aggregate_weekly_data(
         }
 
         # ── 10. Zone alert summary ────────────────────────────
-        za_r = await session.execute(text("""
+        za_r = await session.execute(
+            text("""
             SELECT
                 COUNT(*) as total_zone_alerts,
                 COUNT(CASE WHEN severity='CRITICAL' THEN 1 END) as critical_alerts,
                 COUNT(CASE WHEN acknowledged=0 THEN 1 END) as unacknowledged
             FROM zone_alerts
             WHERE timestamp BETWEEN :ws AND :we || ' 23:59:59'
-        """), {"ws": ws_iso, "we": we_iso})
+        """),
+            {"ws": ws_iso, "we": we_iso},
+        )
         za_row = za_r.mappings().first()
         data["zone_alert_summary"] = {
             "total": int(za_row["total_zone_alerts"] or 0),
@@ -283,18 +301,27 @@ async def aggregate_weekly_data(
         }
 
         # ── 11. Fire/pose/proximity incidents ─────────────────
-        fire_r = await session.execute(text("""
+        fire_r = await session.execute(
+            text("""
             SELECT COUNT(*) FROM fire_hazard_events
             WHERE timestamp BETWEEN :ws AND :we || ' 23:59:59'
-        """), {"ws": ws_iso, "we": we_iso})
-        pose_r = await session.execute(text("""
+        """),
+            {"ws": ws_iso, "we": we_iso},
+        )
+        pose_r = await session.execute(
+            text("""
             SELECT COUNT(*) FROM pose_hazard_events
             WHERE timestamp BETWEEN :ws AND :we || ' 23:59:59'
-        """), {"ws": ws_iso, "we": we_iso})
-        prox_r = await session.execute(text("""
+        """),
+            {"ws": ws_iso, "we": we_iso},
+        )
+        prox_r = await session.execute(
+            text("""
             SELECT COUNT(*) FROM proximity_alerts
             WHERE timestamp BETWEEN :ws AND :we || ' 23:59:59'
-        """), {"ws": ws_iso, "we": we_iso})
+        """),
+            {"ws": ws_iso, "we": we_iso},
+        )
 
         data["special_incidents"] = {
             "fire": int(fire_r.scalar() or 0),
@@ -311,19 +338,22 @@ async def aggregate_weekly_data(
     return data
 
 
-async def generate_llm_summary(data: Dict[str, Any]) -> str:
+async def generate_llm_summary(data: dict[str, Any]) -> str:
     """
     Generate executive summary + recommendations using LLM.
     Falls back to template if LLM unavailable.
-    
+
     # IMPROVED: Error handling with clear fallback
     """
     violations = data.get("total_violations_week", 0)
     score = data.get("site_score", 0)
     delta = data.get("score_delta", 0)
     high_risk = data.get("high_risk_count", 0)
-    top_class = (data.get("by_class", [{}])[0].get("class_name", "unknown")
-                 if data.get("by_class") else "unknown")
+    top_class = (
+        data.get("by_class", [{}])[0].get("class_name", "unknown")
+        if data.get("by_class")
+        else "unknown"
+    )
 
     # Template fallback (always available)
     template = (
@@ -338,8 +368,9 @@ async def generate_llm_summary(data: Dict[str, Any]) -> str:
     )
 
     try:
-        from langchain_ollama import OllamaLLM
         import os
+
+        from langchain_ollama import OllamaLLM
 
         llm = OllamaLLM(
             base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),

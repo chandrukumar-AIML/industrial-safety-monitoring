@@ -19,17 +19,16 @@ Endpoints:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone, time
-from typing import List, Optional
+from datetime import UTC, datetime, time
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from loguru import logger
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import text
 from sqlmodel.ext.asyncio.session import AsyncSession
-from loguru import logger
 
-from ..database import get_session
 from ..auth.rbac import Role, require_role
+from ..database import get_session
 
 router = APIRouter(prefix="/shifts", tags=["shifts"])
 
@@ -38,13 +37,14 @@ _VALID_SHIFT_TYPES = ["morning", "afternoon", "night", "custom"]
 
 # ── Models ────────────────────────────────────────────────────
 
+
 class ShiftCreateRequest(BaseModel):
     shift_name: str = Field(min_length=1, max_length=100)
     shift_type: str = Field(default="custom")
     start_time: str = Field(description="HH:MM (24h format)", pattern=r"^\d{2}:\d{2}$")
     end_time: str = Field(description="HH:MM (24h format)", pattern=r"^\d{2}:\d{2}$")
-    site_id: Optional[str] = Field(default=None, max_length=50)
-    supervisor_name: Optional[str] = Field(default=None, max_length=100)
+    site_id: str | None = Field(default=None, max_length=50)
+    supervisor_name: str | None = Field(default=None, max_length=100)
     max_workers: int = Field(default=50, ge=1, le=500)
     active: bool = True
 
@@ -62,8 +62,8 @@ class ShiftOut(BaseModel):
     shift_type: str
     start_time: str
     end_time: str
-    site_id: Optional[str]
-    supervisor_name: Optional[str]
+    site_id: str | None
+    supervisor_name: str | None
     max_workers: int
     active: bool
     created_at: str
@@ -71,15 +71,16 @@ class ShiftOut(BaseModel):
 
 class ShiftAssignRequest(BaseModel):
     shift_id: int
-    worker_ids: List[str] = Field(min_length=1)
+    worker_ids: list[str] = Field(min_length=1)
 
 
 # ── Helpers ───────────────────────────────────────────────────
 
+
 def _is_shift_active(start_str: str, end_str: str) -> bool:
     """Check if shift is currently active based on HH:MM strings."""
     try:
-        now = datetime.now(timezone.utc).time().replace(second=0, microsecond=0)
+        now = datetime.now(UTC).time().replace(second=0, microsecond=0)
         start = time(*[int(x) for x in start_str.split(":")])
         end = time(*[int(x) for x in end_str.split(":")])
         if start <= end:
@@ -92,6 +93,7 @@ def _is_shift_active(start_str: str, end_str: str) -> bool:
 
 
 # ── Endpoints ─────────────────────────────────────────────────
+
 
 @router.post("", status_code=201, response_model=ShiftOut)
 async def create_shift(
@@ -138,9 +140,9 @@ async def create_shift(
     }
 
 
-@router.get("", response_model=List[ShiftOut])
+@router.get("", response_model=list[ShiftOut])
 async def list_shifts(
-    site_id: Optional[str] = Query(default=None),
+    site_id: str | None = Query(default=None),
     active_only: bool = Query(default=True),
     session: AsyncSession = Depends(get_session),
 ) -> list:
@@ -165,15 +167,12 @@ async def list_shifts(
         params,
     )
     rows = result.mappings().all()
-    return [
-        {**dict(r), "created_at": str(r["created_at"])}
-        for r in rows
-    ]
+    return [{**dict(r), "created_at": str(r["created_at"])} for r in rows]
 
 
 @router.get("/active")
 async def get_active_shift(
-    site_id: Optional[str] = Query(default=None),
+    site_id: str | None = Query(default=None),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     """Get the currently active shift(s) based on current UTC time."""
@@ -194,7 +193,7 @@ async def get_active_shift(
         if _is_shift_active(s["start_time"], s["end_time"])
     ]
     return {
-        "current_utc": datetime.now(timezone.utc).strftime("%H:%M"),
+        "current_utc": datetime.now(UTC).strftime("%H:%M"),
         "active_shifts": active,
         "count": len(active),
     }

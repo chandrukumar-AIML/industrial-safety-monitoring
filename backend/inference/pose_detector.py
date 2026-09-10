@@ -27,17 +27,19 @@ from __future__ import annotations
 
 import math
 import os
-import re
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Any
 
 import cv2
 import mediapipe as mp
 import numpy as np
 from loguru import logger
 
+
 # ── Config: Load from env with validation ─────────────────────
-def _validate_float_range(name: str, value: str, default: float, min_val: float, max_val: float) -> float:
+def _validate_float_range(
+    name: str, value: str, default: float, min_val: float, max_val: float
+) -> float:
     try:
         val = float(value)
         if not min_val <= val <= max_val:
@@ -46,6 +48,7 @@ def _validate_float_range(name: str, value: str, default: float, min_val: float,
     except ValueError:
         logger.warning("{} invalid: {} — using default {}", name, value, default)
         return default
+
 
 # MediaPipe landmark indices
 LM = {
@@ -65,7 +68,9 @@ LM = {
 }
 
 # Minimum landmark visibility to be considered reliable
-_MIN_VISIBILITY = _validate_float_range("POSE_MIN_VISIBILITY", os.getenv("POSE_MIN_VISIBILITY", "0.5"), 0.5, 0.0, 1.0)
+_MIN_VISIBILITY = _validate_float_range(
+    "POSE_MIN_VISIBILITY", os.getenv("POSE_MIN_VISIBILITY", "0.5"), 0.5, 0.0, 1.0
+)
 
 # Performance tuning
 MODEL_COMPLEXITY = int(os.getenv("POSE_MODEL_COMPLEXITY", "1"))
@@ -81,10 +86,11 @@ class PoseLandmarks:
     Normalised pose landmarks for one person.
     Coordinates are in [0, 1] relative to frame size.
     """
-    landmarks: Dict[str, Tuple[float, float, float]]  # name → (x, y, visibility)
-    bbox_xyxy: List[float]  # bounding box of the pose
+
+    landmarks: dict[str, tuple[float, float, float]]  # name → (x, y, visibility)
+    bbox_xyxy: list[float]  # bounding box of the pose
     frame_idx: int
-    timestamp: float = field(default_factory=lambda: __import__('time').time())
+    timestamp: float = field(default_factory=lambda: __import__("time").time())
 
     def __post_init__(self):
         # Validate landmarks dict
@@ -92,7 +98,7 @@ class PoseLandmarks:
             if not 0 <= x <= 1 or not 0 <= y <= 1 or not 0 <= vis <= 1:
                 logger.warning("Invalid landmark coords for {}: ({}, {}, {})", name, x, y, vis)
 
-    def get(self, name: str) -> Optional[Tuple[float, float, float]]:
+    def get(self, name: str) -> tuple[float, float, float] | None:
         """Get landmark (x, y, vis) by name. Returns None if not visible."""
         lm = self.landmarks.get(name)
         if lm is None or lm[2] < _MIN_VISIBILITY:
@@ -104,7 +110,7 @@ class PoseLandmarks:
         point_a: str,
         vertex: str,
         point_b: str,
-    ) -> Optional[float]:
+    ) -> float | None:
         """
         Compute angle (degrees) at `vertex` between vectors to point_a and point_b.
         Returns None if any landmark is not visible.
@@ -117,21 +123,21 @@ class PoseLandmarks:
 
         va = (a[0] - v[0], a[1] - v[1])
         vb = (b[0] - v[0], b[1] - v[1])
-        dot = va[0]*vb[0] + va[1]*vb[1]
-        mag = (math.hypot(*va) * math.hypot(*vb))
+        dot = va[0] * vb[0] + va[1] * vb[1]
+        mag = math.hypot(*va) * math.hypot(*vb)
         if mag < 1e-6:
             return None
         return math.degrees(math.acos(max(-1.0, min(1.0, dot / mag))))
 
-    def midpoint(self, a: str, b: str) -> Optional[Tuple[float, float]]:
+    def midpoint(self, a: str, b: str) -> tuple[float, float] | None:
         """Midpoint between two landmarks."""
         la = self.get(a)
         lb = self.get(b)
         if la is None or lb is None:
             return None
         return ((la[0] + lb[0]) / 2, (la[1] + lb[1]) / 2)
-    
-    def to_dict(self) -> Dict[str, Any]:
+
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dict for JSON serialization."""
         return {
             "landmarks": {k: list(v) for k, v in self.landmarks.items()},
@@ -148,7 +154,7 @@ class PoseDetector:
     # FIXED: Proper resource cleanup to prevent memory leaks
     # FIXED: Input validation + sanitization
     # IMPROVED: Config validation at module load
-    
+
     Designed to run in a ThreadPoolExecutor — not async,
     because MediaPipe is synchronous and CPU-bound.
 
@@ -190,14 +196,16 @@ class PoseDetector:
 
         logger.info(
             "PoseDetector ready | complexity={} | det_conf={} | track_conf={}",
-            model_complexity, min_detection_conf, min_tracking_conf,
+            model_complexity,
+            min_detection_conf,
+            min_tracking_conf,
         )
 
     def detect(
         self,
         frame_bgr: np.ndarray,
         frame_idx: int = 0,
-    ) -> List[PoseLandmarks]:
+    ) -> list[PoseLandmarks]:
         """
         Run BlazePose on a BGR frame.
 
@@ -214,7 +222,7 @@ class PoseDetector:
         """
         if frame_bgr is None or frame_bgr.size == 0:
             return []
-        
+
         # Validate frame
         if frame_bgr.ndim != 3 or frame_bgr.shape[2] != 3:
             logger.warning("Invalid frame for pose detection: {}", frame_bgr.shape)
@@ -254,18 +262,20 @@ class PoseDetector:
         else:
             bbox = [0.0, 0.0, 1.0, 1.0]
 
-        return [PoseLandmarks(
-            landmarks=landmarks,
-            bbox_xyxy=bbox,
-            frame_idx=frame_idx,
-        )]
+        return [
+            PoseLandmarks(
+                landmarks=landmarks,
+                bbox_xyxy=bbox,
+                frame_idx=frame_idx,
+            )
+        ]
 
     def draw_landmarks(
         self,
         frame_bgr: np.ndarray,
         pose: PoseLandmarks,
-        color: Tuple[int, int, int] = (0, 255, 128),
-        hazard_color: Tuple[int, int, int] = (0, 0, 255),
+        color: tuple[int, int, int] = (0, 255, 128),
+        hazard_color: tuple[int, int, int] = (0, 0, 255),
         is_hazard: bool = False,
     ) -> np.ndarray:
         """
@@ -311,7 +321,7 @@ class PoseDetector:
             cv2.line(frame_bgr, pt_a, pt_b, draw_color, thickness, cv2.LINE_AA)
 
         # Draw landmark dots
-        for name, (x, y, vis) in pose.landmarks.items():
+        for _name, (x, y, vis) in pose.landmarks.items():
             if vis < _MIN_VISIBILITY:
                 continue
             px = int(x * w)
@@ -322,7 +332,7 @@ class PoseDetector:
 
     def close(self) -> None:
         """Release MediaPipe resources — call before deletion."""
-        if hasattr(self, '_pose') and self._pose is not None:
+        if hasattr(self, "_pose") and self._pose is not None:
             self._pose.close()
             logger.info("PoseDetector resources released")
 
@@ -341,7 +351,7 @@ class PoseDetector:
 
 
 # ── Singleton with lazy initialization + context manager ─────
-_pose_detector_instance: Optional[PoseDetector] = None
+_pose_detector_instance: PoseDetector | None = None
 
 
 def get_pose_detector(**kwargs) -> PoseDetector:
@@ -355,17 +365,18 @@ def get_pose_detector(**kwargs) -> PoseDetector:
 class PoseDetectorContext:
     """
     Async context manager for PoseDetector lifecycle.
-    
+
     Usage:
         async with PoseDetectorContext() as detector:
             poses = detector.detect(frame_bgr)
     """
+
     def __init__(self, **kwargs):
         self._detector = PoseDetector(**kwargs)
-    
+
     async def __aenter__(self) -> PoseDetector:
         return self._detector
-    
+
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         self._detector.close()
         return False

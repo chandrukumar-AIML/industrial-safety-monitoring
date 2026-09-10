@@ -13,14 +13,11 @@ Sends violation alert with optional image attachment.
 
 from __future__ import annotations
 
-import base64
-import html
 import os
 import re
-from typing import Optional
 
 from loguru import logger
-from pydantic import BaseModel, Field, field_validator, HttpUrl  # FIXED: Pydantic v2 compatibility
+from pydantic import BaseModel, Field, HttpUrl, field_validator  # FIXED: Pydantic v2 compatibility
 
 # ── Config: Load from env with validation ─────────────────────
 TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID", "")
@@ -40,6 +37,7 @@ _SEVERITY_EMOJI = {
 # ── Pydantic model for WhatsApp alert input ──────────────────
 class WhatsAppAlertInput(BaseModel):
     """Validated input for WhatsApp alert."""
+
     to_number: str = Field(..., min_length=10)
     zone_name: str = Field(..., min_length=1, max_length=200)
     zone_type: str = Field(..., pattern="^(danger|restricted|safe|unknown)$")
@@ -47,9 +45,9 @@ class WhatsAppAlertInput(BaseModel):
     missing_ppe: list[str] = Field(default_factory=list)
     severity: str = Field(..., pattern="^(CRITICAL|HIGH|MEDIUM|LOW)$")
     timestamp: str = Field(..., min_length=1)  # ISO format expected
-    image_bytes: Optional[bytes] = Field(default=None, exclude=True)
+    image_bytes: bytes | None = Field(default=None, exclude=True)
     camera_id: str = Field(default="CAM-01", min_length=1, max_length=50)
-    media_url: Optional[HttpUrl] = None  # Pre-hosted image URL (preferred)
+    media_url: HttpUrl | None = None  # Pre-hosted image URL (preferred)
 
     @field_validator("to_number")
     @classmethod
@@ -61,7 +59,7 @@ class WhatsAppAlertInput(BaseModel):
         if clean.startswith("+"):
             clean = clean[1:]
         # E.164: 1-15 digits, starting with country code
-        if not re.match(r'^[1-9]\d{7,14}$', clean):
+        if not re.match(r"^[1-9]\d{7,14}$", clean):
             raise ValueError(f"Invalid E.164 format: {v}")
         return f"whatsapp:+{clean}" if not v.startswith("whatsapp:") else v
 
@@ -99,7 +97,7 @@ def _build_message_body(
     zone_safe = _sanitize_message(zone_name)
     zone_type_safe = _sanitize_message(zone_type)
     camera_safe = _sanitize_message(camera_id)
-    
+
     # Format timestamp nicely
     ts_display = timestamp[:19].replace("T", " ") + " UTC" if len(timestamp) >= 19 else timestamp
 
@@ -122,19 +120,19 @@ def _validate_twilio_config() -> bool:
     if not os.getenv("ENABLE_WHATSAPP_ALERTS", "true").lower() == "true":
         logger.info("WhatsApp alerts disabled via config")
         return False
-    
+
     required = ["TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN"]
     missing = [k for k in required if not os.getenv(k)]
     if missing:
         logger.warning("Twilio config incomplete — WhatsApp alerts disabled: {}", missing)
         return False
-    
+
     # Validate from number format
     from_num = os.getenv("TWILIO_WHATSAPP_FROM", "")
     if not from_num.startswith("whatsapp:+"):
         logger.error("Invalid TWILIO_WHATSAPP_FROM format: {}", from_num)
         return False
-    
+
     logger.info("Twilio config validated | from={}", from_num)
     return True
 
@@ -150,18 +148,18 @@ async def send_whatsapp_alert(
     missing_ppe: list[str],
     severity: str,
     timestamp: str,
-    image_bytes: Optional[bytes] = None,
+    image_bytes: bytes | None = None,
     camera_id: str = "CAM-01",
-    media_url: Optional[str] = None,
+    media_url: str | None = None,
 ) -> bool:
     """
     Send a WhatsApp alert via Twilio.
-    
+
     # FIXED: Input validation via Pydantic
     # FIXED: E.164 phone number validation
     # IMPROVED: Retry logic with exponential backoff
     # IMPROVED: Fallback logging + metrics
-    
+
     Args:
         to_number   : Recipient in E.164 format (e.g. "+1234567890").
         zone_name   : Zone where violation occurred.
@@ -173,14 +171,14 @@ async def send_whatsapp_alert(
         image_bytes : Optional JPEG frame bytes to attach.
         camera_id   : Camera identifier string.
         media_url   : Pre-hosted image URL (preferred over image_bytes).
-    
+
     Returns:
         True if sent successfully, False on error.
     """
     # Validate config first
     if not _TWILIO_READY:
         return False
-    
+
     # Validate & sanitize input
     try:
         validated = WhatsAppAlertInput(
@@ -198,47 +196,55 @@ async def send_whatsapp_alert(
     except Exception as e:
         logger.error("Invalid WhatsApp alert input: {}", e)
         return False
-    
+
     try:
-        from twilio.rest import Client
         from tenacity import retry, stop_after_attempt, wait_exponential
-        
+        from twilio.rest import Client
+
         client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
         body = _build_message_body(
-            validated.zone_name, validated.zone_type, validated.track_id,
-            validated.missing_ppe, validated.severity, validated.timestamp, validated.camera_id,
+            validated.zone_name,
+            validated.zone_type,
+            validated.track_id,
+            validated.missing_ppe,
+            validated.severity,
+            validated.timestamp,
+            validated.camera_id,
         )
-        
+
         msg_kwargs = {
             "from_": TWILIO_FROM_NUMBER,
             "to": validated.to_number,
             "body": body,
         }
-        
+
         # Attach image if a hosted URL is provided (Twilio requires public URL)
         if validated.media_url:
             msg_kwargs["media_url"] = [str(validated.media_url)]
         # Note: image_bytes upload requires Twilio Media endpoint — out of scope for now
-        
+
         @retry(
             stop=stop_after_attempt(TWILIO_MAX_RETRIES),
             wait=wait_exponential(multiplier=1, min=1, max=10),
-            reraise=False  # Don't re-raise — return False on final failure
+            reraise=False,  # Don't re-raise — return False on final failure
         )
         def _send_with_retry():
             return client.messages.create(**msg_kwargs)
-        
+
         message = _send_with_retry()
-        
+
         logger.info(
             "WhatsApp sent | to={} | severity={} | sid={}",
-            validated.to_number, validated.severity, message.sid,
+            validated.to_number,
+            validated.severity,
+            message.sid,
         )
         return True
-        
+
     except Exception as exc:
         logger.error(
             "WhatsApp send failed | to={} | error={}",
-            validated.to_number, exc,
+            validated.to_number,
+            exc,
         )
         return False

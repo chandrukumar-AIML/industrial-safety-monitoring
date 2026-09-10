@@ -19,15 +19,23 @@ from __future__ import annotations
 
 import os
 import re
-from datetime import datetime, timezone
-from enum import Enum, auto
-from typing import Dict, List, Optional, Protocol, runtime_checkable
+from datetime import UTC, datetime
+from enum import Enum
+from typing import Protocol, runtime_checkable
 
 from loguru import logger
-from pydantic import BaseModel, Field, field_validator, model_validator, AnyUrl  # FIXED: Pydantic v2 compatibility
+from pydantic import (  # FIXED: Pydantic v2 compatibility
+    BaseModel,
+    Field,
+    field_validator,
+    model_validator,
+)
+
 
 # ── Config: Load from env with validation ─────────────────────
-def _validate_positive_int(name: str, value: str, default: int, min_val: int = 1, max_val: int = 100) -> int:
+def _validate_positive_int(
+    name: str, value: str, default: int, min_val: int = 1, max_val: int = 100
+) -> int:
     try:
         val = int(value)
         if not min_val <= val <= max_val:
@@ -37,9 +45,10 @@ def _validate_positive_int(name: str, value: str, default: int, min_val: int = 1
         logger.warning("{} invalid: {} — using default {}", name, value, default)
         return default
 
+
 MAX_CAMERAS = _validate_positive_int("MAX_CAMERAS", os.getenv("MAX_CAMERAS", "10"), 10, 1, 100)
 RTSP_TIMEOUT_S = float(os.getenv("CAMERA_RTSP_TIMEOUT_S", "10.0"))
-CAMERA_ID_PATTERN = re.compile(r'^[a-zA-Z0-9_\-]+$')
+CAMERA_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_\-]+$")
 
 
 # ── Enums for type safety ─────────────────────────────────────
@@ -54,25 +63,26 @@ class CameraStatus(str, Enum):
 class CameraConfig(BaseModel):
     """
     Runtime camera configuration with validation.
-    
+
     # FIXED: All fields validated + sanitized
     # IMPROVED: Type hints + defaults for safety
     """
-    camera_id: str = Field(..., min_length=1, max_length=100, pattern=r'^[a-zA-Z0-9_\-]+$')
+
+    camera_id: str = Field(..., min_length=1, max_length=100, pattern=r"^[a-zA-Z0-9_\-]+$")
     camera_name: str = Field(..., min_length=1, max_length=200)
     rtsp_url: str = Field(..., min_length=1, max_length=512)  # rtsp/http/https URLs
     location: str = Field(default="", max_length=300)
-    zone_id: Optional[str] = Field(default=None, max_length=100)
+    zone_id: str | None = Field(default=None, max_length=100)
     status: CameraStatus = CameraStatus.ACTIVE
-    last_seen: Optional[datetime] = None
+    last_seen: datetime | None = None
     reconnect_count: int = Field(default=0, ge=0)
     fps_actual: float = Field(default=0.0, ge=0)
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
-    
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
     class Config:
         arbitrary_types_allowed = True  # For HttpUrl
-    
+
     @field_validator("rtsp_url")
     @classmethod
     def validate_rtsp_scheme(cls, v: str) -> str:
@@ -80,7 +90,7 @@ class CameraConfig(BaseModel):
         v = v.strip()
         valid = ("rtsp://", "rtsps://", "http://", "https://")
         if not v.isdigit() and not any(v.startswith(p) for p in valid):
-            raise ValueError(f"Unsupported URL scheme — use rtsp/rtsps/http/https")
+            raise ValueError("Unsupported URL scheme — use rtsp/rtsps/http/https")
         return v
 
     @field_validator("zone_id")
@@ -91,15 +101,17 @@ class CameraConfig(BaseModel):
         return v
 
     @model_validator(mode="after")
-    def validate_consistency(self) -> "CameraConfig":
+    def validate_consistency(self) -> CameraConfig:
         # Offline/disabled cameras shouldn't have high reconnect counts
         if self.status in ("offline", "disabled") and self.reconnect_count > 100:
             logger.warning(
                 "Camera {} has high reconnect count ({}) while {}",
-                self.camera_id, self.reconnect_count, self.status,
+                self.camera_id,
+                self.reconnect_count,
+                self.status,
             )
         return self
-    
+
     def to_dict(self) -> dict:
         """Convert to dict for JSON serialization."""
         return {
@@ -115,9 +127,9 @@ class CameraConfig(BaseModel):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
-    
+
     @classmethod
-    def from_db_row(cls, row: dict) -> "CameraConfig":
+    def from_db_row(cls, row: dict) -> CameraConfig:
         """Create from SQLAlchemy result row."""
         return cls(
             camera_id=row["camera_id"],
@@ -138,24 +150,32 @@ class CameraConfig(BaseModel):
 @runtime_checkable
 class DBFactoryProtocol(Protocol):
     """Protocol for async session factory — enables mocking in tests."""
+
     def __call__(self): ...
 
 
 # ── Custom exceptions ────────────────────────────────────────
 class RegistryError(Exception):
     """Base exception for registry operations."""
+
     pass
+
 
 class CameraNotFoundError(RegistryError):
     """Raised when camera ID not found."""
+
     pass
+
 
 class CameraLimitError(RegistryError):
     """Raised when MAX_CAMERAS limit reached."""
+
     pass
+
 
 class InvalidCameraConfigError(RegistryError):
     """Raised when camera config validation fails."""
+
     pass
 
 
@@ -164,7 +184,7 @@ def _sanitize_camera_id(camera_id: str) -> str:
     """Sanitize camera_id for safe DB usage."""
     if not camera_id:
         raise ValueError("camera_id cannot be empty")
-    cleaned = CAMERA_ID_PATTERN.sub('_', camera_id.strip())
+    cleaned = CAMERA_ID_PATTERN.sub("_", camera_id.strip())
     if not cleaned:
         raise ValueError(f"Invalid camera_id after sanitization: {camera_id}")
     return cleaned[:100]
@@ -172,19 +192,21 @@ def _sanitize_camera_id(camera_id: str) -> str:
 
 # ── Registry operations ───────────────────────────────────────
 
+
 async def get_all_cameras(
     db_factory: DBFactoryProtocol,
-    status_filter: Optional[CameraStatus | str] = None,
-) -> List[CameraConfig]:
+    status_filter: CameraStatus | str | None = None,
+) -> list[CameraConfig]:
     """
     Fetch all cameras from PostgreSQL.
-    
+
     # FIXED: Parameterized queries only — no string interpolation
     # IMPROVED: Return validated Pydantic models
     """
-    from sqlalchemy import text, select
+    from sqlalchemy import select
+
     from backend.database import CameraRegistry  # Import model
-    
+
     # Convert string status to enum if needed
     if isinstance(status_filter, str):
         try:
@@ -192,42 +214,43 @@ async def get_all_cameras(
         except ValueError:
             logger.warning("Invalid status filter: {} — fetching all", status_filter)
             status_filter = None
-    
+
     async with db_factory() as session:
         query = select(CameraRegistry)
         if status_filter:
             query = query.where(CameraRegistry.status == status_filter.value)
         query = query.order_by(CameraRegistry.camera_id)
-        
+
         result = await session.execute(query)
         rows = result.mappings().all()
-    
+
     return [CameraConfig.from_db_row(dict(row)) for row in rows]
 
 
 async def get_camera(
     camera_id: str,
     db_factory: DBFactoryProtocol,
-) -> Optional[CameraConfig]:
+) -> CameraConfig | None:
     """
     Fetch single camera by ID.
-    
+
     # FIXED: Sanitize input + parameterized query
     """
-    from sqlalchemy import text, select
+    from sqlalchemy import select
+
     from backend.database import CameraRegistry
-    
+
     camera_id_safe = _sanitize_camera_id(camera_id)
-    
+
     async with db_factory() as session:
         result = await session.execute(
             select(CameraRegistry).where(CameraRegistry.camera_id == camera_id_safe)
         )
         row = result.mappings().first()
-    
+
     if not row:
         return None
-    
+
     return CameraConfig.from_db_row(dict(row))
 
 
@@ -237,19 +260,20 @@ async def create_camera(
 ) -> CameraConfig:
     """
     Add a new camera to the registry.
-    
+
     # FIXED: Validate via Pydantic before DB write
     # FIXED: Parameterized INSERT — no SQL injection
     # IMPROVED: Atomic check-and-insert to prevent race conditions
-    
+
     Raises:
         CameraLimitError: If MAX_CAMERAS limit reached.
         InvalidCameraConfigError: If config validation fails.
         ValueError: If camera_id already exists.
     """
-    from sqlalchemy import text, select, func
+    from sqlalchemy import func, select
+
     from backend.database import CameraRegistry
-    
+
     # Convert dict to validated model
     if isinstance(config, dict):
         try:
@@ -258,31 +282,27 @@ async def create_camera(
             raise InvalidCameraConfigError(f"Config validation failed: {e}")
     else:
         validated = config
-    
+
     async with db_factory() as session:
         # Check limit (only count active cameras)
         count_result = await session.execute(
-            select(func.count()).where(
-                CameraRegistry.status != CameraStatus.DISABLED.value
-            )
+            select(func.count()).where(CameraRegistry.status != CameraStatus.DISABLED.value)
         )
         count = count_result.scalar() or 0
-        
+
         if count >= MAX_CAMERAS:
             raise CameraLimitError(
                 f"Camera limit reached ({MAX_CAMERAS}). "
                 "Disable an existing camera before adding a new one."
             )
-        
+
         # Check for duplicate ID
         existing = await session.execute(
-            select(CameraRegistry.camera_id).where(
-                CameraRegistry.camera_id == validated.camera_id
-            )
+            select(CameraRegistry.camera_id).where(CameraRegistry.camera_id == validated.camera_id)
         )
         if existing.first():
             raise ValueError(f"Camera ID '{validated.camera_id}' already exists")
-        
+
         # Insert with parameterized query
         try:
             new_cam = CameraRegistry(
@@ -295,14 +315,14 @@ async def create_camera(
             )
             session.add(new_cam)
             await session.commit()
-            
+
         except Exception as exc:
             await session.rollback()
             # Check for unique constraint violation
             if "unique" in str(exc).lower() or "duplicate" in str(exc).lower():
                 raise ValueError(f"Camera ID '{validated.camera_id}' already exists")
             raise RegistryError(f"Failed to create camera: {exc}")
-    
+
     logger.info("Camera added: {}", validated.camera_id)
     return validated
 
@@ -311,20 +331,21 @@ async def update_camera_status(
     camera_id: str,
     status: CameraStatus | str,
     db_factory: DBFactoryProtocol,
-    last_error: Optional[str] = None,
-    fps_actual: Optional[float] = None,
+    last_error: str | None = None,
+    fps_actual: float | None = None,
 ) -> None:
     """
     Update camera status, last_seen, and optional metrics.
-    
+
     # FIXED: Parameterized UPDATE — no SQL injection
     # FIXED: Sanitize inputs before DB write
     """
-    from sqlalchemy import text, update
+    from sqlalchemy import update
+
     from backend.database import CameraRegistry
-    
+
     camera_id_safe = _sanitize_camera_id(camera_id)
-    
+
     # Convert string status to enum
     if isinstance(status, str):
         try:
@@ -332,28 +353,28 @@ async def update_camera_status(
         except ValueError:
             logger.warning("Invalid status: {} — using OFFLINE", status)
             status = CameraStatus.OFFLINE
-    
+
     # Build update dict
     update_values = {
         "status": status.value,
-        "last_seen": datetime.now(timezone.utc),
-        "updated_at": datetime.now(timezone.utc),
+        "last_seen": datetime.now(UTC),
+        "updated_at": datetime.now(UTC),
     }
-    
+
     if last_error is not None:
         # Truncate long error messages
         update_values["last_error"] = last_error[:500] if last_error else None
-    
+
     if fps_actual is not None:
         if fps_actual < 0:
             logger.warning("Negative fps_actual: {} — ignoring", fps_actual)
         else:
             update_values["fps_actual"] = fps_actual
-    
+
     if status == CameraStatus.OFFLINE:
         # Increment reconnect count atomically
         update_values["reconnect_count"] = CameraRegistry.reconnect_count + 1
-    
+
     async with db_factory() as session:
         try:
             await session.execute(
@@ -362,7 +383,7 @@ async def update_camera_status(
                 .values(**update_values)
             )
             await session.commit()
-            
+
         except Exception as exc:
             logger.error("Camera status update failed: {}", exc)
             await session.rollback()
@@ -376,23 +397,22 @@ async def delete_camera(
 ) -> bool:
     """
     Soft-delete camera (set status=disabled) or hard delete.
-    
+
     # FIXED: Require explicit hard_delete flag to prevent accidental data loss
     # IMPROVED: Return bool for success/failure handling
     """
-    from sqlalchemy import text, update, delete
+    from sqlalchemy import delete, update
+
     from backend.database import CameraRegistry
-    
+
     camera_id_safe = _sanitize_camera_id(camera_id)
-    
+
     async with db_factory() as session:
         try:
             if hard_delete:
                 # Hard delete — use with caution
                 result = await session.execute(
-                    delete(CameraRegistry).where(
-                        CameraRegistry.camera_id == camera_id_safe
-                    )
+                    delete(CameraRegistry).where(CameraRegistry.camera_id == camera_id_safe)
                 )
             else:
                 # Soft delete — default behavior
@@ -401,13 +421,13 @@ async def delete_camera(
                     .where(CameraRegistry.camera_id == camera_id_safe)
                     .values(
                         status=CameraStatus.DISABLED.value,
-                        updated_at=datetime.now(timezone.utc),
+                        updated_at=datetime.now(UTC),
                     )
                 )
-            
+
             await session.commit()
             return result.rowcount > 0
-            
+
         except Exception as exc:
             logger.error("Camera delete failed: {}", exc)
             await session.rollback()
@@ -425,35 +445,41 @@ async def flush_camera_stats(
 ) -> None:
     """
     Upsert hourly camera statistics.
-    
+
     # FIXED: Parameterized UPSERT — no SQL injection
     # FIXED: Validate numeric inputs before DB write
     """
-    from sqlalchemy import text
     from backend.database import CameraStats
-    
+
     camera_id_safe = _sanitize_camera_id(camera_id)
-    
+
     # Validate inputs
     if frames < 0 or detections < 0 or violations < 0:
-        logger.error("Negative stats for camera {}: frames={}, dets={}, viols={}", 
-                    camera_id_safe, frames, detections, violations)
+        logger.error(
+            "Negative stats for camera {}: frames={}, dets={}, viols={}",
+            camera_id_safe,
+            frames,
+            detections,
+            violations,
+        )
         return
-    
+
     if not 0 <= avg_fps <= 1000 or not 0 <= uptime_pct <= 100:
-        logger.warning("Invalid stats values for camera {}: fps={}, uptime={}", 
-                      camera_id_safe, avg_fps, uptime_pct)
+        logger.warning(
+            "Invalid stats values for camera {}: fps={}, uptime={}",
+            camera_id_safe,
+            avg_fps,
+            uptime_pct,
+        )
         return
-    
-    hour = datetime.now(timezone.utc).replace(
-        minute=0, second=0, microsecond=0
-    ).isoformat()
-    
+
+    hour = datetime.now(UTC).replace(minute=0, second=0, microsecond=0).isoformat()
+
     async with db_factory() as session:
         try:
             # Use SQLAlchemy ORM for UPSERT (more portable than raw SQL)
             from sqlalchemy.dialects.postgresql import insert
-            
+
             stmt = insert(CameraStats).values(
                 camera_id=camera_id_safe,
                 stat_hour=hour,
@@ -471,13 +497,13 @@ async def flush_camera_stats(
                     "total_violations": CameraStats.total_violations + violations,
                     "avg_fps": round(avg_fps, 2),
                     "uptime_pct": round(uptime_pct, 2),
-                    "updated_at": datetime.now(timezone.utc),
-                }
+                    "updated_at": datetime.now(UTC),
+                },
             )
-            
+
             await session.execute(stmt)
             await session.commit()
-            
+
         except Exception as exc:
             logger.error("Camera stats flush failed: {}", exc)
             await session.rollback()
@@ -485,14 +511,15 @@ async def flush_camera_stats(
 
 # ── Convenience: Bulk operations ─────────────────────────────
 
+
 async def bulk_update_status(
-    camera_ids: List[str],
+    camera_ids: list[str],
     status: CameraStatus | str,
     db_factory: DBFactoryProtocol,
-) -> Dict[str, bool]:
+) -> dict[str, bool]:
     """
     Update status for multiple cameras efficiently.
-    
+
     Returns:
         Dict mapping camera_id → success bool
     """
@@ -509,24 +536,24 @@ async def bulk_update_status(
 
 async def get_camera_summary(
     db_factory: DBFactoryProtocol,
-) -> Dict[str, any]:
+) -> dict[str, any]:
     """
     Get aggregated summary of all cameras.
-    
+
     Returns:
         Dict with counts by status, avg FPS, total violations, etc.
     """
-    from sqlalchemy import text, func, select
+    from sqlalchemy import func, select
+
     from backend.database import CameraRegistry, CameraStats
-    
+
     async with db_factory() as session:
         # Count by status
         status_counts = await session.execute(
-            select(CameraRegistry.status, func.count())
-            .group_by(CameraRegistry.status)
+            select(CameraRegistry.status, func.count()).group_by(CameraRegistry.status)
         )
         status_summary = {row[0]: row[1] for row in status_counts.all()}
-        
+
         # Avg FPS across active cameras
         avg_fps_result = await session.execute(
             select(func.avg(CameraRegistry.fps_actual)).where(
@@ -534,23 +561,24 @@ async def get_camera_summary(
             )
         )
         avg_fps = avg_fps_result.scalar() or 0.0
-        
+
         # Total violations in last 24h
         from datetime import timedelta
-        yesterday = datetime.now(timezone.utc) - timedelta(hours=24)
-        
+
+        yesterday = datetime.now(UTC) - timedelta(hours=24)
+
         violations_result = await session.execute(
             select(func.sum(CameraStats.total_violations)).where(
                 CameraStats.stat_hour >= yesterday.isoformat()
             )
         )
         total_violations_24h = violations_result.scalar() or 0
-    
+
     return {
         "total_cameras": sum(status_summary.values()),
         "by_status": status_summary,
         "avg_fps_active": round(avg_fps, 1),
         "violations_last_24h": int(total_violations_24h),
         "max_cameras_allowed": MAX_CAMERAS,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
     }

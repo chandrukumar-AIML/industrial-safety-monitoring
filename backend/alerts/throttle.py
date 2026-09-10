@@ -16,9 +16,9 @@ from __future__ import annotations
 import os
 import time
 from collections import defaultdict
-from typing import Dict, List, Optional, Tuple, Union
 
 from loguru import logger
+
 
 # ── Config: Load from env with validation ─────────────────────
 # FIXED: module-level raise → warning + clamp (raise at import crashes the app)
@@ -32,6 +32,7 @@ def _parse_throttle_minutes(raw: str) -> int:
         val = max(1, min(60, val))
     return val
 
+
 def _parse_max_per_hour(raw: str) -> int:
     try:
         val = int(raw)
@@ -42,12 +43,11 @@ def _parse_max_per_hour(raw: str) -> int:
         val = max(1, min(100, val))
     return val
 
+
 THROTTLE_MINUTES = _parse_throttle_minutes(os.getenv("ALERT_THROTTLE_MINUTES", "5"))
 MAX_PER_HOUR = _parse_max_per_hour(os.getenv("ALERT_MAX_PER_HOUR", "20"))
 
-CRITICAL_BYPASS_THROTTLE = os.getenv(
-    "ALERT_CRITICAL_BYPASS_THROTTLE", "true"
-).lower() == "true"
+CRITICAL_BYPASS_THROTTLE = os.getenv("ALERT_CRITICAL_BYPASS_THROTTLE", "true").lower() == "true"
 
 # Backend selection: "memory" or "redis" (stub)
 THROTTLE_BACKEND = os.getenv("ALERT_THROTTLE_BACKEND", "memory").lower()
@@ -65,7 +65,7 @@ _SEVERITY_BUCKET = {
 class AlertThrottle:
     """
     Sliding window throttle for alert delivery.
-    
+
     # IMPROVED: Redis-compatible interface (stub for future)
     # IMPROVED: Metrics collection for monitoring
     """
@@ -81,13 +81,13 @@ class AlertThrottle:
         self._throttle_minutes = throttle_minutes
         self._max_per_hour = max_per_hour
         self._critical_bypass = critical_bypass
-        
+
         # In-memory storage (Redis stub would replace these)
         # (key) → list of send timestamps (monotonic)
-        self._windows: Dict[tuple, List[float]] = defaultdict(list)
+        self._windows: dict[tuple, list[float]] = defaultdict(list)
         # (recipient_id,) → list of hourly send timestamps
-        self._hourly: Dict[int, List[float]] = defaultdict(list)
-        
+        self._hourly: dict[int, list[float]] = defaultdict(list)
+
         # Metrics
         self._metrics = {
             "checks": 0,
@@ -95,20 +95,22 @@ class AlertThrottle:
             "throttled": 0,
             "hourly_capped": 0,
         }
-        
+
         logger.info(
             "AlertThrottle initialised | backend={} | window={}min | max/hour={}",
-            backend, throttle_minutes, max_per_hour,
+            backend,
+            throttle_minutes,
+            max_per_hour,
         )
 
-    def _clean_window(self, key: tuple, window_s: float) -> List[float]:
+    def _clean_window(self, key: tuple, window_s: float) -> list[float]:
         """Remove expired timestamps from a window."""
         now = time.monotonic()
         cleaned = [t for t in self._windows[key] if now - t < window_s]
         self._windows[key] = cleaned
         return cleaned
 
-    def _clean_hourly(self, recipient_id: int) -> List[float]:
+    def _clean_hourly(self, recipient_id: int) -> list[float]:
         """Remove timestamps older than 1 hour."""
         now = time.monotonic()
         cleaned = [t for t in self._hourly[recipient_id] if now - t < 3600]
@@ -124,7 +126,7 @@ class AlertThrottle:
     ) -> bool:
         """
         Returns True if this alert should be sent to this recipient.
-        
+
         Logic:
           1. CRITICAL severity bypasses per-alert throttle (if configured)
           2. Hourly cap always enforced regardless of severity
@@ -132,7 +134,7 @@ class AlertThrottle:
              per THROTTLE_MINUTES
         """
         self._metrics["checks"] += 1
-        
+
         # Hourly cap check (always enforced)
         hourly = self._clean_hourly(recipient_id)
         if len(hourly) >= self._max_per_hour:
@@ -150,7 +152,7 @@ class AlertThrottle:
         # Per-alert window check
         key = (recipient_id, zone_id, track_id, bucket)
         window = self._clean_window(key, self._throttle_minutes * 60)
-        
+
         if len(window) == 0:
             self._metrics["allowed"] += 1
             return True
@@ -197,7 +199,7 @@ class AlertThrottle:
     # ── Redis-compatible interface stubs (for future scaling) ─
     # When ready to scale to multi-process, replace _windows/_hourly
     # with Redis sorted sets (ZADD/ZREMRANGEBYSCORE)
-    
+
     async def _redis_should_send(
         self,
         recipient_id: int,
@@ -225,7 +227,7 @@ class AlertThrottle:
 
 
 # ── Singleton with lazy initialization ───────────────────────
-_alert_throttle_instance: Optional[AlertThrottle] = None
+_alert_throttle_instance: AlertThrottle | None = None
 
 
 def get_alert_throttle(**kwargs) -> AlertThrottle:

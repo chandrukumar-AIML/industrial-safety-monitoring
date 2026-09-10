@@ -25,17 +25,16 @@ from __future__ import annotations
 
 import hashlib
 import secrets
-from datetime import datetime, timezone
-from typing import List, Optional
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from loguru import logger
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import text
 from sqlmodel.ext.asyncio.session import AsyncSession
-from loguru import logger
 
-from ..database import get_session
 from ..auth.rbac import Role, require_role
+from ..database import get_session
 
 router = APIRouter(prefix="/apikeys", tags=["api-keys"])
 
@@ -58,12 +57,14 @@ def _mask_key(key_hash: str) -> str:
 
 # ── Models ────────────────────────────────────────────────────
 
+
 class ApiKeyCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=100, description="Human-readable label")
     role: str = Field(default="viewer", description="viewer | operator | manager | admin")
-    description: Optional[str] = Field(default=None, max_length=500)
-    expires_days: Optional[int] = Field(default=None, ge=1, le=3650,
-                                        description="Days until expiry; null = never expires")
+    description: str | None = Field(default=None, max_length=500)
+    expires_days: int | None = Field(
+        default=None, ge=1, le=3650, description="Days until expiry; null = never expires"
+    )
 
     @field_validator("role")
     @classmethod
@@ -77,19 +78,21 @@ class ApiKeyOut(BaseModel):
     id: int
     name: str
     role: str
-    description: Optional[str]
+    description: str | None
     key_preview: str  # masked hash, not the actual key
-    expires_at: Optional[str]
+    expires_at: str | None
     active: bool
     created_at: str
 
 
 class ApiKeyCreated(ApiKeyOut):
     """Returned only at creation time — includes the plaintext key."""
+
     key: str = Field(description="Store this securely — shown only once!")
 
 
 # ── Endpoints ─────────────────────────────────────────────────
+
 
 @router.post("", status_code=201, response_model=ApiKeyCreated)
 async def create_api_key(
@@ -104,7 +107,8 @@ async def create_api_key(
     expires_at = None
     if body.expires_days:
         from datetime import timedelta
-        expires_at = (datetime.now(timezone.utc) + timedelta(days=body.expires_days)).isoformat()
+
+        expires_at = (datetime.now(UTC) + timedelta(days=body.expires_days)).isoformat()
 
     result = await session.execute(
         text("""
@@ -139,9 +143,9 @@ async def create_api_key(
     }
 
 
-@router.get("", response_model=List[ApiKeyOut])
+@router.get("", response_model=list[ApiKeyOut])
 async def list_api_keys(
-    role: Optional[str] = Query(default=None),
+    role: str | None = Query(default=None),
     active_only: bool = Query(default=True),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
@@ -248,7 +252,9 @@ async def rotate_api_key(
     )
     new_row = result.mappings().first()
     await session.commit()
-    logger.info("API key rotated | old_id={} | new_id={} | name={}", key_id, new_row["id"], old_row["name"])
+    logger.info(
+        "API key rotated | old_id={} | new_id={} | name={}", key_id, new_row["id"], old_row["name"]
+    )
 
     return {
         "id": new_row["id"],

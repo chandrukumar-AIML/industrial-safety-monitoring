@@ -13,16 +13,16 @@ Fire alert logic — most critical component in the system.
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 import time
 from collections import deque
-from datetime import datetime, timezone
-from enum import Enum, auto
-from typing import Dict, List, Optional, TypedDict
+from datetime import UTC, datetime
+from enum import Enum
+from typing import TypedDict
 
 from loguru import logger
 from pydantic import BaseModel, Field, field_validator  # FIXED: Pydantic v2 compatibility
+
 
 # ── Config: Load from env with validation ─────────────────────
 # FIXED: module-level raise → warning + clamp to avoid crashing on bad env vars
@@ -32,33 +32,47 @@ def _clamp(name: str, val: float, lo: float, hi: float, default: float) -> float
         return default
     return val
 
-_FIRE_CLEAR_FRAMES = int(_clamp("FIRE_ALERT_CLEAR_FRAMES",
-    float(os.getenv("FIRE_ALERT_CLEAR_FRAMES", "30")), 5, 100, 30))
 
-_FIRE_ALERT_INTERVAL_S = _clamp("FIRE_ALERT_INTERVAL_SECONDS",
-    float(os.getenv("FIRE_ALERT_INTERVAL_SECONDS", "60.0")), 10, 300, 60.0)
+_FIRE_CLEAR_FRAMES = int(
+    _clamp("FIRE_ALERT_CLEAR_FRAMES", float(os.getenv("FIRE_ALERT_CLEAR_FRAMES", "30")), 5, 100, 30)
+)
 
-_FIRE_CONFIDENCE_THRESHOLD = _clamp("FIRE_CONFIDENCE_THRESHOLD",
-    float(os.getenv("FIRE_CONFIDENCE_THRESHOLD", "0.7")), 0.0, 1.0, 0.7)
+_FIRE_ALERT_INTERVAL_S = _clamp(
+    "FIRE_ALERT_INTERVAL_SECONDS",
+    float(os.getenv("FIRE_ALERT_INTERVAL_SECONDS", "60.0")),
+    10,
+    300,
+    60.0,
+)
 
-_SMOKE_CONFIDENCE_THRESHOLD = _clamp("SMOKE_CONFIDENCE_THRESHOLD",
-    float(os.getenv("SMOKE_CONFIDENCE_THRESHOLD", "0.6")), 0.0, 1.0, 0.6)
+_FIRE_CONFIDENCE_THRESHOLD = _clamp(
+    "FIRE_CONFIDENCE_THRESHOLD", float(os.getenv("FIRE_CONFIDENCE_THRESHOLD", "0.7")), 0.0, 1.0, 0.7
+)
+
+_SMOKE_CONFIDENCE_THRESHOLD = _clamp(
+    "SMOKE_CONFIDENCE_THRESHOLD",
+    float(os.getenv("SMOKE_CONFIDENCE_THRESHOLD", "0.6")),
+    0.0,
+    1.0,
+    0.6,
+)
 
 
 # ── Pydantic model for FireDetection input ───────────────────
 class FireDetection(BaseModel):
     """Validated fire/smoke detection result."""
+
     is_fire: bool
     is_smoke: bool
     confidence: float = Field(..., ge=0, le=1)
     area_frac: float = Field(..., ge=0, le=1)
-    bbox_xyxy: Optional[List[float]] = None  # [x1, y1, x2, y2] in normalized coords
-    timestamp: Optional[str] = None  # ISO format
-    
+    bbox_xyxy: list[float] | None = None  # [x1, y1, x2, y2] in normalized coords
+    timestamp: str | None = None  # ISO format
+
     @field_validator("timestamp", mode="before")
     @classmethod
     def set_default_timestamp(cls, v):
-        return v or datetime.now(timezone.utc).isoformat()
+        return v or datetime.now(UTC).isoformat()
 
 
 # ── Alert event output model ─────────────────────────────────
@@ -84,7 +98,7 @@ class FireState(str, Enum):
 class FireAlertEngine:
     """
     Manages fire alert state machine.
-    
+
     # IMPROVED: Explicit state transitions with logging
     # IMPROVED: Metrics collection for monitoring
     # FIXED: Thread-safe via asyncio (single-threaded event loop)
@@ -103,13 +117,13 @@ class FireAlertEngine:
         self._last_fire_alert_t = 0.0
         self._consecutive_fire = 0
         self._recent_confs: deque = deque(maxlen=10)
-        
+
         # Config (injectable for testing)
         self._clear_frames = clear_frames
         self._alert_interval_s = alert_interval_s
         self._fire_conf_threshold = fire_conf_threshold
         self._smoke_conf_threshold = smoke_conf_threshold
-        
+
         # Metrics
         self._metrics = {
             "fire_triggers": 0,
@@ -117,15 +131,16 @@ class FireAlertEngine:
             "all_clears": 0,
             "false_positives": 0,  # For future ML feedback loop
         }
-        
+
         # Persistence hook (optional)
         self._state_callback = None
         # Stored event loop — set by set_event_loop() from async context at startup
         self._event_loop = None
-        
+
         logger.info(
             "FireAlertEngine initialised | clear_frames={} | interval={}s",
-            clear_frames, alert_interval_s,
+            clear_frames,
+            alert_interval_s,
         )
 
     @property
@@ -147,19 +162,21 @@ class FireAlertEngine:
         """
         self._state_callback = callback
 
-    def _transition(self, new_state: FireState, context: Optional[dict] = None) -> None:
+    def _transition(self, new_state: FireState, context: dict | None = None) -> None:
         """Explicit state transition with logging and optional persistence."""
         if new_state == self._state:
             return
-        
+
         old_state = self._state.value
         self._state = new_state
-        
+
         logger.warning(
             "FireAlertEngine: {} → {} | context={}",
-            old_state, new_state.value, context or {},
+            old_state,
+            new_state.value,
+            context or {},
         )
-        
+
         # Optional persistence hook
         # FIXED: asyncio.create_task in sync method called from background thread → RuntimeError.
         # Use get_running_loop if available, else schedule via call_soon_threadsafe.
@@ -182,32 +199,30 @@ class FireAlertEngine:
                             )
                         )
                     else:
-                        logger.warning("fire_state_persist: no event loop available to schedule callback")
+                        logger.warning(
+                            "fire_state_persist: no event loop available to schedule callback"
+                        )
                 except Exception as exc:
                     logger.warning("fire_state_persist callback failed to schedule: {}", exc)
 
     def evaluate(
         self,
-        detections: List[FireDetection],
+        detections: list[FireDetection],
         frame_idx: int,
-        timestamp: Optional[str] = None,
-    ) -> Dict[str, any]:
+        timestamp: str | None = None,
+    ) -> dict[str, any]:
         """
         Update state machine and return alert events.
-        
+
         # FIXED: Validate input detections
         # IMPROVED: Return structured output with metrics
         """
-        ts = timestamp or datetime.now(timezone.utc).isoformat()
-        
+        ts = timestamp or datetime.now(UTC).isoformat()
+
         # Filter valid detections
-        fires = [
-            d for d in detections 
-            if d.is_fire and d.confidence >= self._fire_conf_threshold
-        ]
+        fires = [d for d in detections if d.is_fire and d.confidence >= self._fire_conf_threshold]
         smokes = [
-            d for d in detections 
-            if d.is_smoke and d.confidence >= self._smoke_conf_threshold
+            d for d in detections if d.is_smoke and d.confidence >= self._smoke_conf_threshold
         ]
 
         # Update consecutive fire counter
@@ -222,15 +237,17 @@ class FireAlertEngine:
         else:
             self._consecutive_fire = 0
 
-        events: List[FireAlertEvent] = []
+        events: list[FireAlertEvent] = []
 
         # ── State transitions ─────────────────────────────────
         if fires:
-            prev_state = self._state
-            self._transition(FireState.FIRE, {
-                "fire_count": len(fires),
-                "max_conf": max(d.confidence for d in fires),
-            })
+            self._transition(
+                FireState.FIRE,
+                {
+                    "fire_count": len(fires),
+                    "max_conf": max(d.confidence for d in fires),
+                },
+            )
 
             now = time.monotonic()
             should_alert = (now - self._last_fire_alert_t) >= self._alert_interval_s
@@ -238,41 +255,49 @@ class FireAlertEngine:
             if should_alert:
                 self._last_fire_alert_t = now
                 self._metrics["fire_triggers"] += 1
-                
+
                 max_conf = max(d.confidence for d in fires)
                 max_area = max(d.area_frac for d in fires)
-                
-                events.append({
-                    "event_type": "fire_emergency",
-                    "severity": "CRITICAL",
-                    "detections": len(fires),
-                    "max_conf": round(max_conf, 3),
-                    "area_frac": round(max_area, 3),
-                    "frame_idx": frame_idx,
-                    "bypass_throttle": True,
-                    "timestamp": ts,
-                })
+
+                events.append(
+                    {
+                        "event_type": "fire_emergency",
+                        "severity": "CRITICAL",
+                        "detections": len(fires),
+                        "max_conf": round(max_conf, 3),
+                        "area_frac": round(max_area, 3),
+                        "frame_idx": frame_idx,
+                        "bypass_throttle": True,
+                        "timestamp": ts,
+                    }
+                )
                 logger.critical(
                     "FIRE EMERGENCY | frame={} | detections={} | max_conf={:.3f} | area={:.1%}",
-                    frame_idx, len(fires), max_conf, max_area,
+                    frame_idx,
+                    len(fires),
+                    max_conf,
+                    max_area,
                 )
 
         elif smokes and self._state == FireState.NORMAL:
             self._transition(FireState.SMOKE, {"smoke_count": len(smokes)})
             self._metrics["smoke_triggers"] += 1
-            
-            events.append({
-                "event_type": "smoke_detected",
-                "severity": "HIGH",
-                "detections": len(smokes),
-                "max_conf": round(max(d.confidence for d in smokes), 3),
-                "frame_idx": frame_idx,
-                "bypass_throttle": False,
-                "timestamp": ts,
-            })
+
+            events.append(
+                {
+                    "event_type": "smoke_detected",
+                    "severity": "HIGH",
+                    "detections": len(smokes),
+                    "max_conf": round(max(d.confidence for d in smokes), 3),
+                    "frame_idx": frame_idx,
+                    "bypass_throttle": False,
+                    "timestamp": ts,
+                }
+            )
             logger.warning(
                 "SMOKE DETECTED | frame={} | detections={}",
-                frame_idx, len(smokes),
+                frame_idx,
+                len(smokes),
             )
 
         elif not fires and not smokes:
@@ -280,17 +305,22 @@ class FireAlertEngine:
                 self._transition(FireState.CLEARING)
             elif self._state == FireState.CLEARING:
                 if self._fire_clear_count >= self._clear_frames:
-                    self._transition(FireState.NORMAL, {
-                        "clear_duration_frames": self._fire_clear_count,
-                    })
+                    self._transition(
+                        FireState.NORMAL,
+                        {
+                            "clear_duration_frames": self._fire_clear_count,
+                        },
+                    )
                     self._metrics["all_clears"] += 1
-                    events.append({
-                        "event_type": "fire_all_clear",
-                        "severity": "LOW",
-                        "frame_idx": frame_idx,
-                        "bypass_throttle": False,
-                        "timestamp": ts,
-                    })
+                    events.append(
+                        {
+                            "event_type": "fire_all_clear",
+                            "severity": "LOW",
+                            "frame_idx": frame_idx,
+                            "bypass_throttle": False,
+                            "timestamp": ts,
+                        }
+                    )
                     logger.info(
                         "Fire all-clear after {} fire-free frames",
                         self._clear_frames,
@@ -306,10 +336,9 @@ class FireAlertEngine:
             "fire_count": len(fires),
             "smoke_count": len(smokes),
             "clear_countdown": max(0, self._clear_frames - self._fire_clear_count)
-                             if self._state == FireState.CLEARING else 0,
-            "avg_confidence": round(
-                sum(self._recent_confs) / max(len(self._recent_confs), 1), 3
-            ),
+            if self._state == FireState.CLEARING
+            else 0,
+            "avg_confidence": round(sum(self._recent_confs) / max(len(self._recent_confs), 1), 3),
             "frame_idx": frame_idx,
             "timestamp": ts,
         }
@@ -321,16 +350,16 @@ class FireAlertEngine:
             "metrics": self.get_metrics(),
         }
 
-    def get_metrics(self) -> Dict[str, any]:
+    def get_metrics(self) -> dict[str, any]:
         """Return current metrics for monitoring endpoint."""
         return {
             **self._metrics,
             "current_state": self._state.value,
             "consecutive_fire": self._consecutive_fire,
             "clear_count": self._fire_clear_count,
-            "avg_recent_conf": round(
-                sum(self._recent_confs) / max(len(self._recent_confs), 1), 3
-            ) if self._recent_confs else 0,
+            "avg_recent_conf": round(sum(self._recent_confs) / max(len(self._recent_confs), 1), 3)
+            if self._recent_confs
+            else 0,
         }
 
     def reset(self) -> None:
@@ -343,7 +372,7 @@ class FireAlertEngine:
 
 
 # ── Singleton with lazy initialization ───────────────────────
-_fire_alert_engine_instance: Optional[FireAlertEngine] = None
+_fire_alert_engine_instance: FireAlertEngine | None = None
 
 
 def get_fire_alert_engine(**kwargs) -> FireAlertEngine:

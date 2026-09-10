@@ -56,10 +56,12 @@ VIOLATION DETAILS:
 Generate the complete incident report now."""
 
 # ── Compiled prompt ───────────────────────────────────────────
-REPORT_PROMPT = ChatPromptTemplate.from_messages([
-    ("system", REPORT_SYSTEM),
-    ("human", REPORT_HUMAN),
-])
+REPORT_PROMPT = ChatPromptTemplate.from_messages(
+    [
+        ("system", REPORT_SYSTEM),
+        ("human", REPORT_HUMAN),
+    ]
+)
 
 
 def validate_prompt_inputs(inputs: dict) -> list[str]:
@@ -68,49 +70,57 @@ def validate_prompt_inputs(inputs: dict) -> list[str]:
     Returns list of warnings (empty = OK).
     """
     warnings = []
-    
+
     # Required fields
-    required = ["class_name", "track_id", "zone_id", "confidence", "timestamp", "frame_idx", "severity_level"]
+    required = [
+        "class_name",
+        "track_id",
+        "zone_id",
+        "confidence",
+        "timestamp",
+        "frame_idx",
+        "severity_level",
+    ]
     for field in required:
         if field not in inputs:
             warnings.append(f"Missing required prompt field: {field}")
-    
+
     # Validate specific fields
     if "class_name" in inputs:
         class_name = inputs["class_name"]
         if not isinstance(class_name, str) or len(class_name) > 100:
             warnings.append(f"Invalid class_name: {class_name}")
-    
+
     if "track_id" in inputs:
         track_id = inputs["track_id"]
         if not isinstance(track_id, int) or track_id < 0:
             warnings.append(f"Invalid track_id: {track_id}")
-    
+
     if "confidence" in inputs:
         conf = inputs["confidence"]
-        if not isinstance(conf, (int, float)) or not 0 <= conf <= 1:
+        if not isinstance(conf, int | float) or not 0 <= conf <= 1:
             warnings.append(f"confidence must be 0-1: {conf}")
-    
+
     if "timestamp" in inputs:
         ts = inputs["timestamp"]
         if not isinstance(ts, str) or not ts:
             warnings.append("timestamp must be a non-empty string")
-    
+
     if "frame_idx" in inputs:
         frame_idx = inputs["frame_idx"]
         if not isinstance(frame_idx, int) or frame_idx < 0:
             warnings.append(f"frame_idx must be non-negative: {frame_idx}")
-    
+
     if "severity_level" in inputs:
         severity = inputs["severity_level"]
         if severity not in ("CRITICAL", "HIGH", "MEDIUM", "LOW"):
             warnings.append(f"Invalid severity_level: {severity}")
-    
+
     # Redact sensitive data in logs
     if "zone_description" in inputs and len(inputs["zone_description"]) > 200:
         warnings.append("zone_description truncated for safety")
         inputs["zone_description"] = inputs["zone_description"][:200] + "..."
-    
+
     return warnings
 
 
@@ -119,6 +129,14 @@ def get_prompt_diagnostics() -> dict:
     return {
         "system_prompt_length": len(REPORT_SYSTEM),
         "human_prompt_length": len(REPORT_HUMAN),
-        "required_fields": ["class_name", "track_id", "zone_id", "confidence", "timestamp", "frame_idx", "severity_level"],
+        "required_fields": [
+            "class_name",
+            "track_id",
+            "zone_id",
+            "confidence",
+            "timestamp",
+            "frame_idx",
+            "severity_level",
+        ],
         "severity_levels": ["CRITICAL", "HIGH", "MEDIUM", "LOW"],
     }

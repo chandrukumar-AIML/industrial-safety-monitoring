@@ -23,10 +23,10 @@ import os
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from .model_registry import ModelVersion, ModelRegistryClient
-    from .canary_router import CanaryRouter, RoutingDecision, ModelVariant, CanaryState
     from .canary_evaluator import EvaluationResult, EvaluationVerdict, evaluate_canary
+    from .canary_router import CanaryRouter, CanaryState, ModelVariant, RoutingDecision
     from .deployment_manager import DeploymentManager
+    from .model_registry import ModelRegistryClient, ModelVersion
 
 # ── Explicit public API ──────────────────────────────────────
 __all__ = [
@@ -40,7 +40,6 @@ __all__ = [
     "EvaluationResult",
     "EvaluationVerdict",
     "DeploymentManager",
-    
     # Functions
     "register_model",
     "get_production_model",
@@ -54,17 +53,14 @@ __all__ = [
     "promote_canary",
     "rollback_canary",
     "run_canary_evaluation_loop",
-    
     # Singletons
     "canary_router",
     "model_registry",
-    
     # Exceptions
     "MLOpsError",
     "DeploymentError",
     "ModelRegistryError",
     "CanaryEvaluationError",
-    
     # Config helpers
     "get_mlops_config",
     "validate_mlops_config",
@@ -78,11 +74,11 @@ __description__ = "MLOps utilities for model deployment and canary testing"
 # ── Config helpers ───────────────────────────────────────────
 def get_mlops_config() -> dict:
     """Return current MLOps configuration."""
-    from .model_registry import MLFLOW_URI, MODEL_NAME, MAP_GATE
-    from .canary_router import CANARY_PCT, CANARY_MIN_FRAMES
     from .canary_evaluator import CONFIDENCE_GAIN, MAX_LATENCY_RATIO, ROLLBACK_CONFIDENCE_DROP
+    from .canary_router import CANARY_MIN_FRAMES, CANARY_PCT
     from .deployment_manager import AUTO_PROMOTE, EVAL_INTERVAL_S
-    
+    from .model_registry import MAP_GATE, MLFLOW_URI, MODEL_NAME
+
     return {
         "mlflow": {
             "tracking_uri": MLFLOW_URI,
@@ -109,17 +105,17 @@ def validate_mlops_config() -> list[str]:
     Returns list of warnings (empty = OK).
     """
     warnings = []
-    
+
     # MLflow URI
     mlflow_uri = os.getenv("MLFLOW_TRACKING_URI", "sqlite:///mlflow/mlflow.db")
     if not mlflow_uri.startswith(("http://", "https://", "sqlite://", "postgresql://")):
         warnings.append(f"MLFLOW_TRACKING_URI may be invalid: {mlflow_uri}")
-    
+
     # Model name
     model_name = os.getenv("MLFLOW_MODEL_NAME", "")
     if not model_name or not model_name.strip():
         warnings.append("MLFLOW_MODEL_NAME is empty — using default 'ppe-detector'")
-    
+
     # Thresholds
     try:
         map_gate = float(os.getenv("CANARY_MAP_GATE_THRESHOLD", "0.85"))
@@ -127,45 +123,58 @@ def validate_mlops_config() -> list[str]:
             warnings.append(f"CANARY_MAP_GATE_THRESHOLD={map_gate} outside 0-1 range")
     except ValueError:
         warnings.append("CANARY_MAP_GATE_THRESHOLD must be a float")
-    
+
     try:
         canary_pct = float(os.getenv("CANARY_TRAFFIC_PCT", "10"))
         if not 0 <= canary_pct <= 100:
             warnings.append(f"CANARY_TRAFFIC_PCT={canary_pct} outside 0-100 range")
     except ValueError:
         warnings.append("CANARY_TRAFFIC_PCT must be a float")
-    
+
     # Auto-promote warning
     if os.getenv("AUTO_PROMOTE_CANARY", "false").lower() == "true":
-        warnings.append("AUTO_PROMOTE_CANARY is enabled — ensure thorough testing before production use")
-    
+        warnings.append(
+            "AUTO_PROMOTE_CANARY is enabled — ensure thorough testing before production use"
+        )
+
     return warnings
 
 
 # ── Lazy loader for heavy imports ────────────────────────────
 def __getattr__(name: str) -> Any:
     """Lazy-load submodules only when accessed."""
-    
+
     if name in ("ModelVersion", "ModelRegistryClient", "model_registry"):
         from . import model_registry as module
+
         return getattr(module, name)
-    
+
     if name in ("CanaryRouter", "RoutingDecision", "ModelVariant", "CanaryState", "canary_router"):
         from . import canary_router as module
+
         return getattr(module, name)
-    
+
     if name in ("EvaluationResult", "EvaluationVerdict", "evaluate_canary", "record_canary_metric"):
         from . import canary_evaluator as module
+
         return getattr(module, name)
-    
-    if name in ("DeploymentManager", "start_canary_deployment", "promote_canary", "rollback_canary", "run_canary_evaluation_loop"):
+
+    if name in (
+        "DeploymentManager",
+        "start_canary_deployment",
+        "promote_canary",
+        "rollback_canary",
+        "run_canary_evaluation_loop",
+    ):
         from . import deployment_manager as module
+
         return getattr(module, name)
-    
+
     if name in ("MLOpsError", "DeploymentError", "ModelRegistryError", "CanaryEvaluationError"):
         from . import model_registry as module
+
         return getattr(module, name)
-    
+
     raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
 
@@ -173,5 +182,6 @@ def __getattr__(name: str) -> Any:
 _mlops_warnings = validate_mlops_config()
 if _mlops_warnings and os.getenv("MLOPS_STRICT_MODE", "false").lower() == "true":
     import warnings as _warnings
+
     for w in _mlops_warnings:
         _warnings.warn(f"MLOps config: {w}", RuntimeWarning, stacklevel=2)

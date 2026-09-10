@@ -24,19 +24,20 @@ Supervisors see fire density maps on the dashboard.
 from __future__ import annotations
 
 import os
-import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional, Tuple, Dict, Any
 
 import cv2
 import numpy as np
 from loguru import logger
 from ultralytics import YOLO
 
+
 # ── Config: Load from env with validation ─────────────────────
-def _validate_float_range(name: str, value: str, default: float, min_val: float, max_val: float) -> float:
+def _validate_float_range(
+    name: str, value: str, default: float, min_val: float, max_val: float
+) -> float:
     try:
         val = float(value)
         if not min_val <= val <= max_val:
@@ -46,9 +47,14 @@ def _validate_float_range(name: str, value: str, default: float, min_val: float,
         logger.warning("{} invalid: {} — using default {}", name, value, default)
         return default
 
+
 FIRE_MODEL_PATH = os.getenv("FIRE_MODEL_PATH", "models/fire_best.pt")
-FIRE_CONF_THRESH = _validate_float_range("FIRE_CONF_THRESHOLD", os.getenv("FIRE_CONF_THRESHOLD", "0.45"), 0.45, 0.0, 1.0)
-SMOKE_CONF_THRESH = _validate_float_range("SMOKE_CONF_THRESHOLD", os.getenv("SMOKE_CONF_THRESHOLD", "0.40"), 0.40, 0.0, 1.0)
+FIRE_CONF_THRESH = _validate_float_range(
+    "FIRE_CONF_THRESHOLD", os.getenv("FIRE_CONF_THRESHOLD", "0.45"), 0.45, 0.0, 1.0
+)
+SMOKE_CONF_THRESH = _validate_float_range(
+    "SMOKE_CONF_THRESHOLD", os.getenv("SMOKE_CONF_THRESHOLD", "0.40"), 0.40, 0.0, 1.0
+)
 
 # Heatmap config
 HEATMAP_DECAY = float(os.getenv("FIRE_HEATMAP_DECAY", "0.999"))
@@ -57,20 +63,21 @@ if not 0.9 <= HEATMAP_DECAY <= 1.0:
     HEATMAP_DECAY = 0.999
 
 # Fire appearance colours for OpenCV annotation (BGR)
-_FIRE_COLOR = (0, 69, 255)   # orange-red
-_SMOKE_COLOR = (130, 130, 130)   # grey
+_FIRE_COLOR = (0, 69, 255)  # orange-red
+_SMOKE_COLOR = (130, 130, 130)  # grey
 
 
 # ── Pydantic-style dataclass for validation ──────────────────
 @dataclass
 class FireDetection:
     """One fire or smoke detection."""
-    hazard_type: str             # "fire" | "smoke"
+
+    hazard_type: str  # "fire" | "smoke"
     confidence: float
-    bbox_xyxy: List[float]
-    centroid: Tuple[float, float]
-    area_frac: float           # fraction of frame area
-    severity: str             # CRITICAL (fire) | HIGH (smoke)
+    bbox_xyxy: list[float]
+    centroid: tuple[float, float]
+    area_frac: float  # fraction of frame area
+    severity: str  # CRITICAL (fire) | HIGH (smoke)
     frame_idx: int
     timestamp: float = field(default_factory=time.time)
 
@@ -100,7 +107,7 @@ class FireHeatmap:
     """
     Separate Gaussian accumulator for fire/smoke density.
     Slower decay than PPE heatmap — fire lingers longer.
-    
+
     # IMPROVED: Memory-efficient accumulator with bounded history
     """
 
@@ -118,7 +125,7 @@ class FireHeatmap:
         self._colormap = colormap
         self._accumulator = np.zeros((height, width), dtype=np.float32)
         # Bounded deque for rolling max history
-        self._max_history: List[float] = []
+        self._max_history: list[float] = []
         self._max_history_limit = max_history
         self._frame_count = 0
 
@@ -133,7 +140,7 @@ class FireHeatmap:
             return
 
         # Sigma scales with fire bbox size
-        diag = ((x2-x1)**2 + (y2-y1)**2) ** 0.5
+        diag = ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5
         sigma = int(np.clip(diag * 0.3, 15, 100))
 
         ksize = int(6 * sigma) | 1
@@ -145,10 +152,14 @@ class FireHeatmap:
         weight = 2.0 if detection.is_fire else 1.0
 
         hh, hw = kern.shape
-        hy1 = max(0, cy - hh//2);  hy2 = min(self.H, cy + hh//2 + 1)
-        hx1 = max(0, cx - hw//2);  hx2 = min(self.W, cx + hw//2 + 1)
-        ky1 = hy1 - (cy - hh//2);  ky2 = ky1 + (hy2 - hy1)
-        kx1 = hx1 - (cx - hw//2);  kx2 = kx1 + (hx2 - hx1)
+        hy1 = max(0, cy - hh // 2)
+        hy2 = min(self.H, cy + hh // 2 + 1)
+        hx1 = max(0, cx - hw // 2)
+        hx2 = min(self.W, cx + hw // 2 + 1)
+        ky1 = hy1 - (cy - hh // 2)
+        ky2 = ky1 + (hy2 - hy1)
+        kx1 = hx1 - (cx - hw // 2)
+        kx2 = kx1 + (hx2 - hx1)
 
         if ky2 > ky1 and kx2 > kx1:
             self._accumulator[hy1:hy2, hx1:hx2] += kern[ky1:ky2, kx1:kx2] * weight
@@ -168,9 +179,7 @@ class FireHeatmap:
         if stable_max < 1e-6:
             return frame_bgr.copy()
 
-        normalised = np.clip(
-            self._accumulator / stable_max * 255, 0, 255
-        ).astype(np.uint8)
+        normalised = np.clip(self._accumulator / stable_max * 255, 0, 255).astype(np.uint8)
         colourised = cv2.applyColorMap(normalised, self._colormap)
 
         fh, fw = frame_bgr.shape[:2]
@@ -180,7 +189,7 @@ class FireHeatmap:
 
         mask = (normalised > 20).astype(np.float32)
         mask = cv2.GaussianBlur(mask, (21, 21), 0)
-        mask_3 = np.stack([mask]*3, axis=-1)
+        mask_3 = np.stack([mask] * 3, axis=-1)
         return (
             frame_bgr.astype(np.float32) * (1 - mask_3 * alpha)
             + colourised.astype(np.float32) * mask_3 * alpha
@@ -220,7 +229,7 @@ class FireDetector:
     # FIXED: Input validation + sanitization
     # IMPROVED: Memory management for long-running processes
     # FIXED: No credential leakage in logs
-    
+
     Two confidence thresholds — fire requires higher confidence
     than smoke because false positives (sunlight, orange equipment)
     are more costly for fire than for smoke.
@@ -268,14 +277,16 @@ class FireDetector:
         self._model.predict(dummy, conf=0.3, verbose=False)
         logger.info(
             "FireDetector ready | classes={} | fire_conf={} | smoke_conf={}",
-            self._class_names, fire_conf_thresh, smoke_conf_thresh,
+            self._class_names,
+            fire_conf_thresh,
+            smoke_conf_thresh,
         )
 
     def detect(
         self,
         frame_bgr: np.ndarray,
         frame_idx: int = 0,
-    ) -> List[FireDetection]:
+    ) -> list[FireDetection]:
         """
         Run fire/smoke detection on one frame.
 
@@ -319,9 +330,7 @@ class FireDetector:
             results.boxes.conf.cpu().numpy(),
         ):
             cid = int(cls)
-            class_name = (self._class_names[cid]
-                          if cid < len(self._class_names)
-                          else "unknown")
+            class_name = self._class_names[cid] if cid < len(self._class_names) else "unknown"
             confidence = float(conf)
 
             # Per-class threshold filter
@@ -335,7 +344,7 @@ class FireDetector:
             if x1 >= x2 or y1 >= y2:
                 logger.debug("Invalid bbox coordinates — skipping detection")
                 continue
-                
+
             cx = (x1 + x2) / 2
             cy = (y1 + y2) / 2
             area = (x2 - x1) * (y2 - y1)
@@ -363,7 +372,7 @@ class FireDetector:
     def annotate(
         self,
         frame: np.ndarray,
-        detections: List[FireDetection],
+        detections: list[FireDetection],
     ) -> np.ndarray:
         """
         Draw fire/smoke bounding boxes on frame.
@@ -378,12 +387,12 @@ class FireDetector:
             Annotated frame (modified in-place and returned).
         """
         for det in detections:
-            x1, y1, x2, y2 = [int(v) for v in det.bbox_xyxy]
+            x1, y1, x2, y2 = (int(v) for v in det.bbox_xyxy)
             # Validate coordinates before drawing
             if x1 < 0 or y1 < 0 or x2 > frame.shape[1] or y2 > frame.shape[0]:
                 logger.debug("Detection bbox out of frame bounds — skipping annotation")
                 continue
-                
+
             color = _FIRE_COLOR if det.is_fire else _SMOKE_COLOR
             thickness = 4 if det.is_fire else 2
 
@@ -391,44 +400,59 @@ class FireDetector:
 
             # Confidence label with background
             label = f"{det.hazard_type.upper()} {det.confidence:.0%}"
-            (lw, lh), _ = cv2.getTextSize(
-                label, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2
-            )
+            (lw, lh), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
             cv2.rectangle(
                 frame,
                 (x1, y1 - lh - 8),
                 (x1 + lw + 6, y1),
-                color, -1,
+                color,
+                -1,
             )
             cv2.putText(
-                frame, label,
+                frame,
+                label,
                 (x1 + 3, y1 - 4),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.55, (255, 255, 255), 2, cv2.LINE_AA,
+                0.55,
+                (255, 255, 255),
+                2,
+                cv2.LINE_AA,
             )
 
             # FIRE: add warning triangle
             if det.is_fire:
                 cx = int((x1 + x2) / 2)
                 cy = int((y1 + y2) / 2)
-                pts = np.array([
-                    [cx, cy - 20],
-                    [cx - 15, cy + 10],
-                    [cx + 15, cy + 10],
-                ], np.int32)
+                pts = np.array(
+                    [
+                        [cx, cy - 20],
+                        [cx - 15, cy + 10],
+                        [cx + 15, cy + 10],
+                    ],
+                    np.int32,
+                )
                 cv2.polylines(frame, [pts], True, (0, 255, 255), 2)
-                cv2.putText(frame, "!", (cx - 4, cy + 8),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5,
-                            (0, 255, 255), 2, cv2.LINE_AA)
+                cv2.putText(
+                    frame,
+                    "!",
+                    (cx - 4, cy + 8),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (0, 255, 255),
+                    2,
+                    cv2.LINE_AA,
+                )
 
         # Emergency overlay for fire
         has_fire = any(d.is_fire for d in detections)
         if has_fire:
             overlay = frame.copy()
             cv2.rectangle(
-                overlay, (0, 0),
+                overlay,
+                (0, 0),
                 (frame.shape[1], frame.shape[0]),
-                (0, 0, 180), 8,
+                (0, 0, 180),
+                8,
             )
             cv2.addWeighted(overlay, 0.3, frame, 0.7, 0, frame)
             cv2.putText(
@@ -436,7 +460,10 @@ class FireDetector:
                 "🔥 FIRE EMERGENCY — EVACUATE",
                 (10, 45),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.9, (0, 0, 255), 3, cv2.LINE_AA,
+                0.9,
+                (0, 0, 255),
+                3,
+                cv2.LINE_AA,
             )
 
         return frame

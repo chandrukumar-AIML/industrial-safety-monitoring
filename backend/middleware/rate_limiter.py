@@ -29,14 +29,14 @@ Notes:
   - For production with multiple workers, use Redis backend:
     limiter = Limiter(key_func=get_remote_address, storage_uri="redis://localhost:6379")
 """
+
 from __future__ import annotations
 
-import os
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse
 from slowapi import Limiter
-from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
 # ── Limiter instance ─────────────────────────────────────────
 # In production with Redis: storage_uri="redis://localhost:6379"
@@ -50,11 +50,11 @@ limiter = Limiter(
 # ── Predefined limit strings ──────────────────────────────────
 # Reference these in route decorators for consistency
 LIMIT_DEFAULT = "60/minute"
-LIMIT_INFERENCE = "20/minute"    # SHAP, heatmap — expensive
-LIMIT_EXPORT = "5/minute"        # CSV export — large files
-LIMIT_CHATBOT = "10/minute"      # LLM calls — cost-sensitive
-LIMIT_AUTH = "10/minute"         # Auth endpoints — brute-force protection
-LIMIT_REPORTS = "10/minute"      # Report generation — LLM + PDF
+LIMIT_INFERENCE = "20/minute"  # SHAP, heatmap — expensive
+LIMIT_EXPORT = "5/minute"  # CSV export — large files
+LIMIT_CHATBOT = "10/minute"  # LLM calls — cost-sensitive
+LIMIT_AUTH = "10/minute"  # Auth endpoints — brute-force protection
+LIMIT_REPORTS = "10/minute"  # Report generation — LLM + PDF
 
 
 def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded) -> Response:
@@ -67,12 +67,14 @@ def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded) -> Res
         status_code=429,
         content={
             "error": "rate_limit_exceeded",
-            "detail": [{
-                "message": (
-                    f"Too many requests. Rate limit: {exc.detail}. "
-                    f"Retry after {retry_after} seconds."
-                )
-            }],
+            "detail": [
+                {
+                    "message": (
+                        f"Too many requests. Rate limit: {exc.detail}. "
+                        f"Retry after {retry_after} seconds."
+                    )
+                }
+            ],
         },
         headers={
             "Retry-After": str(retry_after),

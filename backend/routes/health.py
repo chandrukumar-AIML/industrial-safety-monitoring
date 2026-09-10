@@ -15,8 +15,8 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from loguru import logger
 
-from ..state import app_state
 from ..models import SystemStatus
+from ..state import app_state
 
 router = APIRouter(prefix="/health", tags=["system"])
 
@@ -113,6 +113,7 @@ async def readiness() -> JSONResponse:
     Returns 200 only when all critical dependencies respond.
     """
     from sqlalchemy import text as _text
+
     from ..database import AsyncSessionLocal
 
     checks: dict[str, str] = {}

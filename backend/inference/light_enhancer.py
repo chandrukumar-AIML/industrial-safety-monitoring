@@ -32,16 +32,19 @@ from __future__ import annotations
 import os
 import time
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
-from typing import Optional, Tuple, Dict, Any
+from typing import Any
 
 import cv2
 import numpy as np
 from loguru import logger
 
+
 # ── Config: Load from env with validation ─────────────────────
-def _validate_float_range(name: str, value: str, default: float, min_val: float, max_val: float) -> float:
+def _validate_float_range(
+    name: str, value: str, default: float, min_val: float, max_val: float
+) -> float:
     try:
         val = float(value)
         if not min_val <= val <= max_val:
@@ -51,11 +54,20 @@ def _validate_float_range(name: str, value: str, default: float, min_val: float,
         logger.warning("{} invalid: {} — using default {}", name, value, default)
         return default
 
+
 ENABLED = os.getenv("LIGHT_ENHANCEMENT_ENABLED", "true").lower() == "true"
-DARK_THRESHOLD = _validate_float_range("LIGHT_DARK_THRESHOLD", os.getenv("LIGHT_DARK_THRESHOLD", "80"), 80, 0, 255)
-VERY_DARK_THRESH = _validate_float_range("LIGHT_VERY_DARK_THRESHOLD", os.getenv("LIGHT_VERY_DARK_THRESHOLD", "50"), 50, 0, DARK_THRESHOLD)
-CLAHE_CLIP_LOW = _validate_float_range("LIGHT_CLAHE_CLIP_NORMAL", os.getenv("LIGHT_CLAHE_CLIP_NORMAL", "2.0"), 2.0, 1.0, 10.0)
-CLAHE_CLIP_DARK = _validate_float_range("LIGHT_CLAHE_CLIP_DARK", os.getenv("LIGHT_CLAHE_CLIP_DARK", "3.5"), 3.5, 1.0, 10.0)
+DARK_THRESHOLD = _validate_float_range(
+    "LIGHT_DARK_THRESHOLD", os.getenv("LIGHT_DARK_THRESHOLD", "80"), 80, 0, 255
+)
+VERY_DARK_THRESH = _validate_float_range(
+    "LIGHT_VERY_DARK_THRESHOLD", os.getenv("LIGHT_VERY_DARK_THRESHOLD", "50"), 50, 0, DARK_THRESHOLD
+)
+CLAHE_CLIP_LOW = _validate_float_range(
+    "LIGHT_CLAHE_CLIP_NORMAL", os.getenv("LIGHT_CLAHE_CLIP_NORMAL", "2.0"), 2.0, 1.0, 10.0
+)
+CLAHE_CLIP_DARK = _validate_float_range(
+    "LIGHT_CLAHE_CLIP_DARK", os.getenv("LIGHT_CLAHE_CLIP_DARK", "3.5"), 3.5, 1.0, 10.0
+)
 CLAHE_TILE = int(os.getenv("LIGHT_CLAHE_TILE_SIZE", "8"))
 if not 4 <= CLAHE_TILE <= 16:
     logger.warning("LIGHT_CLAHE_TILE_SIZE invalid — using 8")
@@ -72,14 +84,15 @@ class LightMode(Enum):
 @dataclass
 class EnhancementStats:
     """Per-frame enhancement statistics for monitoring."""
+
     mode: LightMode
     mean_y_before: float
     mean_y_after: float
     gamma_applied: float
     clahe_applied: bool
     elapsed_ms: float
-    
-    def to_dict(self) -> Dict[str, Any]:
+
+    def to_dict(self) -> dict[str, Any]:
         return {
             "mode": self.mode.value,
             "mean_y_before": self.mean_y_before,
@@ -98,7 +111,7 @@ class LightEnhancer:
     # IMPROVED: deque(maxlen=30) for bounded brightness history
     # FIXED: Input validation + bounds checking
     # FIXED: No PII leakage in logs
-    
+
     Usage:
         enhancer = LightEnhancer()
         enhanced_frame, stats = enhancer.process(frame_bgr)
@@ -143,8 +156,12 @@ class LightEnhancer:
         logger.info(
             "LightEnhancer ready | dark_thresh={} | very_dark_thresh={} | "
             "clahe_clip=({},{}) | tile={} | history_len={}",
-            dark_threshold, very_dark_threshold,
-            clahe_clip_low, clahe_clip_dark, clahe_tile, history_len,
+            dark_threshold,
+            very_dark_threshold,
+            clahe_clip_low,
+            clahe_clip_dark,
+            clahe_tile,
+            history_len,
         )
 
     def _mean_luminance(self, frame_bgr: np.ndarray) -> float:
@@ -159,7 +176,7 @@ class LightEnhancer:
         if frame_bgr.ndim != 3 or frame_bgr.shape[2] != 3:
             logger.warning("Invalid frame for luminance: {}", frame_bgr.shape)
             return 128.0
-            
+
         ycrcb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2YCrCb)
         return float(ycrcb[:, :, 0].mean())
 
@@ -199,12 +216,11 @@ class LightEnhancer:
         """
         if gamma == 1.0:
             return frame_bgr  # No-op
-            
+
         inv_gamma = 1.0 / gamma
-        lut = np.array([
-            min(255, int((i / 255.0) ** inv_gamma * 255))
-            for i in range(256)
-        ], dtype=np.uint8)
+        lut = np.array(
+            [min(255, int((i / 255.0) ** inv_gamma * 255)) for i in range(256)], dtype=np.uint8
+        )
         return cv2.LUT(frame_bgr, lut)
 
     def _apply_clahe(self, frame_bgr: np.ndarray, mode: LightMode) -> np.ndarray:
@@ -212,10 +228,7 @@ class LightEnhancer:
         Apply CLAHE to luminance channel only.
         Preserves hue and saturation — avoids colour distortion.
         """
-        clahe = (
-            self._clahe_dark if mode == LightMode.VERY_DARK
-            else self._clahe_low
-        )
+        clahe = self._clahe_dark if mode == LightMode.VERY_DARK else self._clahe_low
 
         # Work in YCrCb colour space
         ycrcb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2YCrCb)
@@ -242,7 +255,7 @@ class LightEnhancer:
     def process(
         self,
         frame_bgr: np.ndarray,
-    ) -> Tuple[np.ndarray, Optional[EnhancementStats]]:
+    ) -> tuple[np.ndarray, EnhancementStats | None]:
         """
         Main enhancement pipeline.
 
@@ -314,10 +327,12 @@ class LightEnhancer:
 
         if LOG_STATS:
             logger.debug(
-                "LightEnhancer | mode={} | Y: {:.1f}→{:.1f} | "
-                "gamma={} | dt={:.1f}ms",
-                mode.value, mean_y_before, mean_y_after,
-                gamma, elapsed_ms,
+                "LightEnhancer | mode={} | Y: {:.1f}→{:.1f} | " "gamma={} | dt={:.1f}ms",
+                mode.value,
+                mean_y_before,
+                mean_y_after,
+                gamma,
+                elapsed_ms,
             )
 
         return enhanced, stats
@@ -382,7 +397,7 @@ class LightEnhancer:
 
 
 # ── Singleton with lazy initialization ───────────────────────
-_light_enhancer_instance: Optional[LightEnhancer] = None
+_light_enhancer_instance: LightEnhancer | None = None
 
 
 def get_light_enhancer(**kwargs) -> LightEnhancer:

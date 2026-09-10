@@ -16,8 +16,8 @@ from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import Response
 from loguru import logger
 
+from ..models import ErrorResponse, HeatmapResponse, HeatmapStats
 from ..state import app_state
-from ..models import HeatmapResponse, HeatmapStats, ErrorResponse
 
 router = APIRouter(prefix="/heatmap", tags=["heatmap"])
 
@@ -125,5 +125,7 @@ def get_diagnostics() -> dict:
     return {
         "pipeline_available": pipeline is not None,
         "heatmap_available": pipeline is not None and hasattr(pipeline, "heatmap"),
-        "heatmap_stats": pipeline.heatmap.stats if pipeline and hasattr(pipeline, "heatmap") else None,
+        "heatmap_stats": pipeline.heatmap.stats
+        if pipeline and hasattr(pipeline, "heatmap")
+        else None,
     }

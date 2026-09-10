@@ -10,15 +10,22 @@ GET  /auth/me       — returns current user info from JWT
 from __future__ import annotations
 
 import os
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import text
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from ..database import get_session
 from ..auth.jwt_utils import (
-    UserCreate, UserLogin, Token, TokenData,
-    hash_password, verify_password, create_access_token, decode_access_token,
+    Token,
+    TokenData,
+    UserCreate,
+    UserLogin,
+    create_access_token,
+    decode_access_token,
+    hash_password,
+    verify_password,
 )
+from ..database import get_session
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -46,12 +53,14 @@ async def login(body: UserLogin, session: AsyncSession = Depends(get_session)):
     if not user["is_active"]:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account disabled")
 
-    token = create_access_token({
-        "sub": user["email"],
-        "role": user["role"],
-        "org_id": user["org_id"],
-        "user_id": user["id"],
-    })
+    token = create_access_token(
+        {
+            "sub": user["email"],
+            "role": user["role"],
+            "org_id": user["org_id"],
+            "user_id": user["id"],
+        }
+    )
     return Token(
         access_token=token,
         user_email=user["email"],
@@ -89,12 +98,14 @@ async def register(body: UserCreate, session: AsyncSession = Depends(get_session
     row = result.mappings().first()
     await session.commit()
 
-    token = create_access_token({
-        "sub": row["email"],
-        "role": row["role"],
-        "org_id": row["org_id"],
-        "user_id": row["id"],
-    })
+    token = create_access_token(
+        {
+            "sub": row["email"],
+            "role": row["role"],
+            "org_id": row["org_id"],
+            "user_id": row["id"],
+        }
+    )
     return Token(
         access_token=token,
         user_email=row["email"],
@@ -110,7 +121,9 @@ async def me(request: Request):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
     token_data: TokenData | None = decode_access_token(auth.removeprefix("Bearer ").strip())
     if not token_data:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token"
+        )
     return {
         "email": token_data.email,
         "role": token_data.role,

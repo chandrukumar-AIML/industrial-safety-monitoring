@@ -33,7 +33,6 @@ import hashlib
 import os
 import secrets
 from enum import IntEnum
-from typing import Optional
 
 from fastapi import Depends, Header, HTTPException, Query, status
 from loguru import logger
@@ -51,8 +50,9 @@ if not ADMIN_API_KEY and RBAC_ENABLED:
 
 class Role(IntEnum):
     """Privilege levels — higher value = more access."""
+
     VIEWER = 1
-    WORKER = 2      # alias: operator
+    WORKER = 2  # alias: operator
     SUPERVISOR = 3  # alias: manager
     ADMIN = 4
 
@@ -97,9 +97,9 @@ def _load_static_keys() -> None:
     # Legacy aliases also accepted: MANAGER_API_KEY, OPERATOR_API_KEY
     for role, env_var in [
         (Role.SUPERVISOR, "SUPERVISOR_API_KEY"),
-        (Role.SUPERVISOR, "MANAGER_API_KEY"),   # legacy alias
+        (Role.SUPERVISOR, "MANAGER_API_KEY"),  # legacy alias
         (Role.WORKER, "WORKER_API_KEY"),
-        (Role.WORKER, "OPERATOR_API_KEY"),       # legacy alias
+        (Role.WORKER, "OPERATOR_API_KEY"),  # legacy alias
         (Role.VIEWER, "VIEWER_API_KEY"),
     ]:
         key = os.getenv(env_var, "")
@@ -111,7 +111,7 @@ def _load_static_keys() -> None:
 _load_static_keys()
 
 
-def resolve_role(api_key: str) -> Optional[Role]:
+def resolve_role(api_key: str) -> Role | None:
     """
     Resolve an API key to a Role.
     Returns None if key is invalid.
@@ -129,10 +129,11 @@ def generate_api_key() -> str:
 
 # ── FastAPI Dependency ────────────────────────────────────────
 
+
 def _extract_api_key(
-    x_api_key: Optional[str] = Header(default=None, alias="X-API-Key"),
-    api_key: Optional[str] = Query(default=None, include_in_schema=False),
-) -> Optional[str]:
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+    api_key: str | None = Query(default=None, include_in_schema=False),
+) -> str | None:
     """Extract API key from header or query param."""
     return x_api_key or api_key
 
@@ -151,8 +152,9 @@ def require_role(minimum_role: Role):
         ):
             ...
     """
+
     async def _check(
-        key: Optional[str] = Depends(_extract_api_key),
+        key: str | None = Depends(_extract_api_key),
     ) -> None:
         if not RBAC_ENABLED:
             # RBAC disabled — open access (dev mode)
@@ -176,14 +178,14 @@ def require_role(minimum_role: Role):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Insufficient privileges. Required: {ROLE_NAMES[minimum_role]}, "
-                       f"your role: {ROLE_NAMES[role]}",
+                f"your role: {ROLE_NAMES[role]}",
             )
 
     return _check
 
 
 def get_current_role(
-    key: Optional[str] = Depends(_extract_api_key),
+    key: str | None = Depends(_extract_api_key),
 ) -> Role:
     """
     Dependency that returns the current role (or ADMIN if RBAC disabled).

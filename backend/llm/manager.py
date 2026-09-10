@@ -18,15 +18,17 @@ Usage:
     from backend.llm import llm_manager
     text = await llm_manager.generate(prompt, context="incident_report")
 """
+
 from __future__ import annotations
 
 import os
 import time
-from typing import Optional
+
 from loguru import logger
 
 try:
     import httpx
+
     _HTTPX_OK = True
 except ImportError:
     _HTTPX_OK = False
@@ -86,14 +88,21 @@ class LLMManager:
 
         # Cost tracking (tokens used per provider)
         self._cost_tracker: dict[str, int] = {
-            "groq": 0, "gemini": 0, "openai": 0, "ollama": 0, "template": 0
+            "groq": 0,
+            "gemini": 0,
+            "openai": 0,
+            "ollama": 0,
+            "template": 0,
         }
 
         # Log which providers are available
         available = []
-        if self._groq_key:   available.append("groq ✅")
-        if self._gemini_key: available.append("gemini ✅")
-        if self._openai_key: available.append("openai ✅")
+        if self._groq_key:
+            available.append("groq ✅")
+        if self._gemini_key:
+            available.append("gemini ✅")
+        if self._openai_key:
+            available.append("openai ✅")
         available.append("ollama (local)")
         available.append("template (always)")
         logger.info("LLM Manager initialized | chain: {}", " → ".join(available))
@@ -128,7 +137,7 @@ class LLMManager:
 
         # Chandru fingerprint: Groq → Gemini → OpenAI → Ollama fallback chain
         providers = [
-            ("groq",   self._call_groq),
+            ("groq", self._call_groq),
             ("gemini", self._call_gemini),
             ("openai", self._call_openai),
             ("ollama", self._call_ollama),
@@ -143,7 +152,9 @@ class LLMManager:
                     self._cost_tracker[name] = self._cost_tracker.get(name, 0) + token_est
                     logger.info(
                         "LLM response | provider={} | tokens≈{} | time={:.2f}s",
-                        name, token_est, elapsed
+                        name,
+                        token_est,
+                        elapsed,
                     )
                     return result.strip()
             except Exception as exc:
@@ -169,7 +180,8 @@ class LLMManager:
         result = await self.generate(prompt, context="severity_score", max_tokens=5)
         # Extract first integer from response
         import re
-        nums = re.findall(r'\b([1-9]|10)\b', result)
+
+        nums = re.findall(r"\b([1-9]|10)\b", result)
         return int(nums[0]) if nums else 5
 
     async def generate_incident_narrative(
@@ -206,7 +218,6 @@ Be concise and professional."""
         raw = await self.generate(prompt, context="incident_report", max_tokens=400)
 
         # Parse sections from response
-        import re
         sections = {
             "incident_summary": self._extract_section(raw, "SUMMARY", "ROOT CAUSE"),
             "root_cause_analysis": self._extract_section(raw, "ROOT CAUSE", "CORRECTIVE"),
@@ -327,9 +338,10 @@ Be concise and professional."""
         return _TEMPLATES.get(context, _TEMPLATES["safety_advice"])
 
     @staticmethod
-    def _extract_section(text: str, start_marker: str, end_marker: Optional[str]) -> str:
+    def _extract_section(text: str, start_marker: str, end_marker: str | None) -> str:
         """Extract a section from LLM response between markers."""
         import re
+
         if end_marker:
             pattern = rf"{re.escape(start_marker)}[:\s]*(.*?)(?={re.escape(end_marker)})"
         else:
@@ -345,15 +357,18 @@ Be concise and professional."""
         """Return which providers are configured (for health endpoint)."""
         return {
             "chain": "groq → gemini → openai → ollama → template",
-            "groq":     bool(self._groq_key),
-            "gemini":   bool(self._gemini_key),
-            "openai":   bool(self._openai_key),
-            "ollama":   True,   # always try
-            "template": True,   # always available
+            "groq": bool(self._groq_key),
+            "gemini": bool(self._gemini_key),
+            "openai": bool(self._openai_key),
+            "ollama": True,  # always try
+            "template": True,  # always available
             "active_model": (
-                self._groq_model   if self._groq_key
-                else self._gemini_model if self._gemini_key
-                else self._openai_model if self._openai_key
+                self._groq_model
+                if self._groq_key
+                else self._gemini_model
+                if self._gemini_key
+                else self._openai_model
+                if self._openai_key
                 else self._ollama_model
             ),
             "cost_tracker": self._cost_tracker,

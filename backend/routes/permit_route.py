@@ -25,40 +25,40 @@ Endpoints:
   GET  /permits/validate/{permit_id}     → QR validation check (zone entry)
   GET  /permits/expired                  → List expired active permits
 """
+
 import hashlib
 import json
 import secrets
-from datetime import datetime, timezone, timedelta
-from typing import List, Optional
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from loguru import logger
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlmodel.ext.asyncio.session import AsyncSession
-from loguru import logger
 
 from backend.database import get_session
-from backend.middleware.rate_limiter import limiter, LIMIT_DEFAULT
+from backend.middleware.rate_limiter import LIMIT_DEFAULT, limiter
 
 router = APIRouter(prefix="/permits", tags=["permits"])
 
 # Work types that require permits
 WORK_TYPES = {
-    "hot_work":         {"description": "Welding, cutting, grinding — fire hazard", "risk": "CRITICAL"},
-    "confined_space":   {"description": "Tank entry, manhole, enclosed area", "risk": "CRITICAL"},
-    "electrical":       {"description": "LOTO, HV work, panel maintenance", "risk": "HIGH"},
-    "height_work":      {"description": "Work above 2 metres / scaffolding", "risk": "HIGH"},
-    "chemical":         {"description": "Hazardous chemical handling/transfer", "risk": "HIGH"},
-    "excavation":       {"description": "Digging, trenching, below-ground work", "risk": "HIGH"},
-    "radiation":        {"description": "Radiography, nuclear sources", "risk": "CRITICAL"},
-    "cold_work":        {"description": "Non-spark mechanical work", "risk": "MEDIUM"},
-    "general":          {"description": "General maintenance permit", "risk": "LOW"},
+    "hot_work": {"description": "Welding, cutting, grinding — fire hazard", "risk": "CRITICAL"},
+    "confined_space": {"description": "Tank entry, manhole, enclosed area", "risk": "CRITICAL"},
+    "electrical": {"description": "LOTO, HV work, panel maintenance", "risk": "HIGH"},
+    "height_work": {"description": "Work above 2 metres / scaffolding", "risk": "HIGH"},
+    "chemical": {"description": "Hazardous chemical handling/transfer", "risk": "HIGH"},
+    "excavation": {"description": "Digging, trenching, below-ground work", "risk": "HIGH"},
+    "radiation": {"description": "Radiography, nuclear sources", "risk": "CRITICAL"},
+    "cold_work": {"description": "Non-spark mechanical work", "risk": "MEDIUM"},
+    "general": {"description": "General maintenance permit", "risk": "LOW"},
 }
 
 
 def _generate_permit_id() -> str:
     """Generate a unique permit ID: PTW-YYYYMMDD-XXXXXX"""
-    date_str = datetime.now(timezone.utc).strftime("%Y%m%d")
+    date_str = datetime.now(UTC).strftime("%Y%m%d")
     suffix = secrets.token_hex(3).upper()
     return f"PTW-{date_str}-{suffix}"
 
@@ -72,25 +72,29 @@ def _generate_qr_code(permit_id: str) -> str:
 
 # ── Request models ────────────────────────────────────────────
 
+
 class PermitRequest(BaseModel):
-    org_id: Optional[str] = Field(default=None, max_length=64)
-    site_id: Optional[str] = Field(default=None, max_length=50)
-    zone_id: Optional[str] = Field(default=None, max_length=64)
+    org_id: str | None = Field(default=None, max_length=64)
+    site_id: str | None = Field(default=None, max_length=50)
+    zone_id: str | None = Field(default=None, max_length=64)
     work_type: str = Field(max_length=50)
-    worker_id: Optional[str] = Field(default=None, max_length=64)
-    supervisor_id: Optional[str] = Field(default=None, max_length=64)
-    valid_from: Optional[str] = Field(default=None, description="ISO datetime")
-    valid_until: Optional[str] = Field(default=None, description="ISO datetime")
-    risk_assessment: Optional[dict] = Field(default=None, description="Risk assessment JSON")
+    worker_id: str | None = Field(default=None, max_length=64)
+    supervisor_id: str | None = Field(default=None, max_length=64)
+    valid_from: str | None = Field(default=None, description="ISO datetime")
+    valid_until: str | None = Field(default=None, description="ISO datetime")
+    risk_assessment: dict | None = Field(default=None, description="Risk assessment JSON")
 
 
 class ApproveRequest(BaseModel):
     approved_by: str = Field(min_length=1, max_length=100)
-    notes: Optional[str] = Field(default=None, max_length=500)
-    valid_hours: int = Field(default=8, ge=1, le=72, description="Permit valid for N hours from approval")
+    notes: str | None = Field(default=None, max_length=500)
+    valid_hours: int = Field(
+        default=8, ge=1, le=72, description="Permit valid for N hours from approval"
+    )
 
 
 # ── Routes ────────────────────────────────────────────────────
+
 
 @router.post("", status_code=201)
 @limiter.limit(LIMIT_DEFAULT)
@@ -103,12 +107,13 @@ async def request_permit(
     if body.work_type not in WORK_TYPES:
         raise HTTPException(
             status_code=400,
-            detail=f"Unknown work_type '{body.work_type}'. Valid: {list(WORK_TYPES.keys())}"
+            detail=f"Unknown work_type '{body.work_type}'. Valid: {list(WORK_TYPES.keys())}",
         )
 
     permit_id = _generate_permit_id()
 
-    await session.exec(text("""
+    await session.exec(
+        text("""
         INSERT INTO permits_to_work
             (permit_id, org_id, site_id, zone_id, work_type,
              worker_id, supervisor_id, status, valid_from, valid_until, risk_assessment)
@@ -116,27 +121,30 @@ async def request_permit(
             (:permit_id, :org_id, :site_id, :zone_id, :work_type,
              :worker_id, :supervisor_id, 'pending', :valid_from, :valid_until, :risk_assessment)
     """).bindparams(
-        permit_id=permit_id,
-        org_id=body.org_id,
-        site_id=body.site_id,
-        zone_id=body.zone_id,
-        work_type=body.work_type,
-        worker_id=body.worker_id,
-        supervisor_id=body.supervisor_id,
-        valid_from=body.valid_from,
-        valid_until=body.valid_until,
-        risk_assessment=json.dumps(body.risk_assessment) if body.risk_assessment else None,
-    ))
+            permit_id=permit_id,
+            org_id=body.org_id,
+            site_id=body.site_id,
+            zone_id=body.zone_id,
+            work_type=body.work_type,
+            worker_id=body.worker_id,
+            supervisor_id=body.supervisor_id,
+            valid_from=body.valid_from,
+            valid_until=body.valid_until,
+            risk_assessment=json.dumps(body.risk_assessment) if body.risk_assessment else None,
+        )
+    )
 
     work_info = WORK_TYPES[body.work_type]
-    logger.info("Permit requested | id={} | type={} | worker={}", permit_id, body.work_type, body.worker_id)
+    logger.info(
+        "Permit requested | id={} | type={} | worker={}", permit_id, body.work_type, body.worker_id
+    )
 
     return {
         "permit_id": permit_id,
         "status": "pending",
         "work_type": body.work_type,
         "risk_level": work_info["risk"],
-        "message": f"Permit submitted. Awaiting supervisor approval.",
+        "message": "Permit submitted. Awaiting supervisor approval.",
     }
 
 
@@ -144,9 +152,9 @@ async def request_permit(
 @limiter.limit(LIMIT_DEFAULT)
 async def list_permits(
     request: Request,
-    status: Optional[str] = None,
-    org_id: Optional[str] = None,
-    zone_id: Optional[str] = None,
+    status: str | None = None,
+    org_id: str | None = None,
+    zone_id: str | None = None,
     session: AsyncSession = Depends(get_session),
 ):
     """List permits with optional filters."""
@@ -172,13 +180,11 @@ async def list_permits(
         ORDER BY created_at DESC LIMIT 200
     """
 
-    result = await session.exec(
-        text(query).bindparams(**params) if params else text(query)
-    )
+    result = await session.exec(text(query).bindparams(**params) if params else text(query))
     rows = result.fetchall()
 
     permits = []
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     for row in rows:
         d = dict(row._mapping)
         # Check if expired
@@ -186,7 +192,7 @@ async def list_permits(
             try:
                 vu = datetime.fromisoformat(str(d["valid_until"]).replace("Z", "+00:00"))
                 if vu.tzinfo is None:
-                    vu = vu.replace(tzinfo=timezone.utc)
+                    vu = vu.replace(tzinfo=UTC)
                 if vu < now:
                     d["status"] = "expired"
             except (ValueError, TypeError):
@@ -202,25 +208,27 @@ async def list_permits(
 async def validate_permit(
     request: Request,
     permit_id: str,
-    zone_id: Optional[str] = None,
+    zone_id: str | None = None,
     session: AsyncSession = Depends(get_session),
 ):
     """
     Validate a permit at zone entry (QR scan endpoint).
     Returns allowed/denied with reason.
     """
-    result = await session.exec(text("""
+    result = await session.exec(
+        text("""
         SELECT permit_id, status, zone_id, work_type,
                valid_from, valid_until, worker_id, approved_by
         FROM permits_to_work WHERE permit_id = :permit_id
-    """).bindparams(permit_id=permit_id))
+    """).bindparams(permit_id=permit_id)
+    )
 
     row = result.fetchone()
     if not row:
         return {"allowed": False, "reason": "Permit not found", "permit_id": permit_id}
 
     d = dict(row._mapping)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     # Check status
     if d["status"] != "active":
@@ -231,7 +239,7 @@ async def validate_permit(
         try:
             vu = datetime.fromisoformat(str(d["valid_until"]).replace("Z", "+00:00"))
             if vu.tzinfo is None:
-                vu = vu.replace(tzinfo=timezone.utc)
+                vu = vu.replace(tzinfo=UTC)
             if vu < now:
                 return {"allowed": False, "reason": "Permit has expired", **d}
         except (ValueError, TypeError):
@@ -241,7 +249,7 @@ async def validate_permit(
         try:
             vf = datetime.fromisoformat(str(d["valid_from"]).replace("Z", "+00:00"))
             if vf.tzinfo is None:
-                vf = vf.replace(tzinfo=timezone.utc)
+                vf = vf.replace(tzinfo=UTC)
             if vf > now:
                 return {"allowed": False, "reason": "Permit is not yet valid", **d}
         except (ValueError, TypeError):
@@ -268,21 +276,26 @@ async def approve_permit(
 ):
     """Approve a pending permit."""
     # Check exists and is pending
-    result = await session.exec(text(
-        "SELECT id, status FROM permits_to_work WHERE permit_id = :permit_id"
-    ).bindparams(permit_id=permit_id))
+    result = await session.exec(
+        text("SELECT id, status FROM permits_to_work WHERE permit_id = :permit_id").bindparams(
+            permit_id=permit_id
+        )
+    )
     row = result.fetchone()
 
     if not row:
         raise HTTPException(status_code=404, detail=f"Permit '{permit_id}' not found")
     if row.status != "pending":
-        raise HTTPException(status_code=400, detail=f"Permit status is '{row.status}' — can only approve 'pending'")
+        raise HTTPException(
+            status_code=400, detail=f"Permit status is '{row.status}' — can only approve 'pending'"
+        )
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     valid_until = now + timedelta(hours=body.valid_hours)
     qr_code = _generate_qr_code(permit_id)
 
-    await session.exec(text("""
+    await session.exec(
+        text("""
         UPDATE permits_to_work
         SET status = 'active',
             approved_by = :approved_by,
@@ -292,14 +305,17 @@ async def approve_permit(
             qr_code = :qr_code
         WHERE permit_id = :permit_id
     """).bindparams(
-        permit_id=permit_id,
-        approved_by=body.approved_by,
-        valid_from=now.isoformat(),
-        valid_until=valid_until.isoformat(),
-        qr_code=qr_code,
-    ))
+            permit_id=permit_id,
+            approved_by=body.approved_by,
+            valid_from=now.isoformat(),
+            valid_until=valid_until.isoformat(),
+            qr_code=qr_code,
+        )
+    )
 
-    logger.info("Permit approved | id={} | by={} | valid_until={}", permit_id, body.approved_by, valid_until)
+    logger.info(
+        "Permit approved | id={} | by={} | valid_until={}", permit_id, body.approved_by, valid_until
+    )
     return {
         "permit_id": permit_id,
         "status": "active",
@@ -319,14 +335,18 @@ async def cancel_permit(
     session: AsyncSession = Depends(get_session),
 ):
     """Cancel an active or pending permit."""
-    result = await session.exec(text("""
+    result = await session.exec(
+        text("""
         UPDATE permits_to_work
         SET status = 'cancelled'
         WHERE permit_id = :permit_id AND status IN ('pending', 'active')
-    """).bindparams(permit_id=permit_id))
+    """).bindparams(permit_id=permit_id)
+    )
 
     if result.rowcount == 0:
-        raise HTTPException(status_code=404, detail=f"Permit '{permit_id}' not found or already closed")
+        raise HTTPException(
+            status_code=404, detail=f"Permit '{permit_id}' not found or already closed"
+        )
 
     return {"permit_id": permit_id, "status": "cancelled"}
 
@@ -339,15 +359,21 @@ async def close_permit(
     session: AsyncSession = Depends(get_session),
 ):
     """Close a permit after work is complete."""
-    result = await session.exec(text("""
+    result = await session.exec(
+        text("""
         UPDATE permits_to_work SET status = 'closed'
         WHERE permit_id = :permit_id AND status = 'active'
-    """).bindparams(permit_id=permit_id))
+    """).bindparams(permit_id=permit_id)
+    )
 
     if result.rowcount == 0:
         raise HTTPException(status_code=404, detail=f"Permit '{permit_id}' not found or not active")
 
-    return {"permit_id": permit_id, "status": "closed", "message": "Work permit closed successfully"}
+    return {
+        "permit_id": permit_id,
+        "status": "closed",
+        "message": "Work permit closed successfully",
+    }
 
 
 @router.get("/expired/list")
@@ -357,15 +383,17 @@ async def list_expired_permits(
     session: AsyncSession = Depends(get_session),
 ):
     """List permits that are active but have passed valid_until."""
-    now = datetime.now(timezone.utc).isoformat()
-    result = await session.exec(text("""
+    now = datetime.now(UTC).isoformat()
+    result = await session.exec(
+        text("""
         SELECT permit_id, org_id, zone_id, work_type, worker_id,
                valid_until, approved_by
         FROM permits_to_work
         WHERE status = 'active' AND valid_until < :now
         ORDER BY valid_until DESC
         LIMIT 100
-    """).bindparams(now=now))
+    """).bindparams(now=now)
+    )
 
     rows = result.fetchall()
     expired = [dict(row._mapping) for row in rows]

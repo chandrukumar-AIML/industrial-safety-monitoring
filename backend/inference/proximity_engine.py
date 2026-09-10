@@ -25,26 +25,28 @@ per DEBOUNCE_S seconds.
 from __future__ import annotations
 
 import os
-import re
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple, Any, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 import cv2
 import numpy as np
 from loguru import logger
 
 from ..calibration.calibrator import (
-    CameraCalibration,
-    pixel_distance,
     CRITICAL_M,
     WARNING_M,
+    CameraCalibration,
+    pixel_distance,
 )
 from ..inference.machinery_detector import MachineryDetection
 
+
 # ── Config: Load from env with validation ─────────────────────
-def _validate_float_range(name: str, value: str, default: float, min_val: float, max_val: float) -> float:
+def _validate_float_range(
+    name: str, value: str, default: float, min_val: float, max_val: float
+) -> float:
     try:
         val = float(value)
         if not min_val <= val <= max_val:
@@ -54,7 +56,10 @@ def _validate_float_range(name: str, value: str, default: float, min_val: float,
         logger.warning("{} invalid: {} — using default {}", name, value, default)
         return default
 
-DEBOUNCE_S = _validate_float_range("PROXIMITY_DEBOUNCE_S", os.getenv("PROXIMITY_DEBOUNCE_S", "3.0"), 3.0, 0.1, 60.0)
+
+DEBOUNCE_S = _validate_float_range(
+    "PROXIMITY_DEBOUNCE_S", os.getenv("PROXIMITY_DEBOUNCE_S", "3.0"), 3.0, 0.1, 60.0
+)
 USE_PIXEL_FALLBACK = os.getenv("USE_PIXEL_FALLBACK", "true").lower() == "true"
 DEFAULT_PIXELS_PER_METRE = float(os.getenv("DEFAULT_PIXELS_PER_METRE", "80.0"))
 if DEFAULT_PIXELS_PER_METRE <= 0:
@@ -66,6 +71,7 @@ if DEFAULT_PIXELS_PER_METRE <= 0:
 @runtime_checkable
 class CalibrationProtocol(Protocol):
     """Protocol for camera calibration — enables mocking in tests."""
+
     def real_distance_metres(self, px1: float, py1: float, px2: float, py2: float) -> float: ...
     def pixel_distance_to_metres(self, pixel_dist: float) -> float: ...
     @property
@@ -76,16 +82,17 @@ class CalibrationProtocol(Protocol):
 @dataclass
 class ProximityAlert:
     """One person ↔ machine proximity alert."""
+
     person_track_id: int
     machine_track_id: int
     machine_class: str
     pixel_distance: float
-    real_distance_m: Optional[float]
+    real_distance_m: float | None
     alert_level: str  # CRITICAL | WARNING
-    zone_id: Optional[str]
+    zone_id: str | None
     frame_idx: int
-    person_foot: Tuple[float, float]
-    machine_foot: Tuple[float, float]
+    person_foot: tuple[float, float]
+    machine_foot: tuple[float, float]
     description: str
     timestamp: float = field(default_factory=time.time)
 
@@ -97,8 +104,8 @@ class ProximityAlert:
             raise ValueError(f"pixel_distance cannot be negative: {self.pixel_distance}")
         if self.real_distance_m is not None and self.real_distance_m < 0:
             raise ValueError(f"real_distance_m cannot be negative: {self.real_distance_m}")
-    
-    def to_dict(self) -> Dict[str, Any]:
+
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dict for JSON serialization."""
         return {
             "person_track_id": self.person_track_id,
@@ -124,7 +131,7 @@ class ProximityEngine:
     # IMPROVED: Calibration fallback with graceful degradation
     # IMPROVED: Debounce logic with atomic timestamp updates
     # FIXED: No PII leakage in logs
-    
+
     Usage:
         engine = ProximityEngine()
         engine.load_calibration()
@@ -150,10 +157,10 @@ class ProximityEngine:
             logger.warning("default_ppm must be positive — using 80.0")
             default_ppm = 80.0
 
-        self._calibration: Optional[CalibrationProtocol] = None
+        self._calibration: CalibrationProtocol | None = None
         # (person_track_id, machine_track_id) → last alert timestamp
-        self._last_alert: Dict[Tuple[int, int], float] = defaultdict(float)
-        
+        self._last_alert: dict[tuple[int, int], float] = defaultdict(float)
+
         # Config (injectable for testing)
         self._debounce_s = debounce_s
         self._use_pixel_fallback = use_pixel_fallback
@@ -161,28 +168,33 @@ class ProximityEngine:
 
         logger.info(
             "ProximityEngine initialised | debounce={}s | pixel_fallback={} | default_ppm={}",
-            debounce_s, use_pixel_fallback, default_ppm,
+            debounce_s,
+            use_pixel_fallback,
+            default_ppm,
         )
 
     def load_calibration(
         self,
-        calibration: Optional[CalibrationProtocol] = None,
-        path: Optional[str] = None,
+        calibration: CalibrationProtocol | None = None,
+        path: str | None = None,
         camera_id: str = "default",
     ) -> bool:
         """
         Load camera calibration. Returns True if calibration loaded.
         Falls back to pixel-distance mode if not found.
-        
+
         # IMPROVED: Accept injected calibration for testing
         """
         if calibration is not None:
             self._calibration = calibration
-            logger.info("Proximity engine calibrated (injected) | ppm={}", calibration.pixels_per_meter)
+            logger.info(
+                "Proximity engine calibrated (injected) | ppm={}", calibration.pixels_per_meter
+            )
             return True
-        
+
         # Fallback to file-based loading
         from pathlib import Path
+
         cal_path = Path(path) if path else None
         self._calibration = CameraCalibration.load(cal_path, camera_id)
 
@@ -193,16 +205,14 @@ class ProximityEngine:
             )
             return True
         else:
-            logger.warning(
-                "No calibration — proximity alerts use pixel distance"
-            )
+            logger.warning("No calibration — proximity alerts use pixel distance")
             return False
 
     def _get_person_foot(
         self,
-        bbox_xyxy: List[float],
-        frame_wh: Tuple[int, int],
-    ) -> Tuple[float, float]:
+        bbox_xyxy: list[float],
+        frame_wh: tuple[int, int],
+    ) -> tuple[float, float]:
         """
         Get person's ground contact point (foot).
         Uses bottom-centre of bounding box as approximation.
@@ -216,10 +226,10 @@ class ProximityEngine:
 
     def _compute_distance(
         self,
-        person_foot: Tuple[float, float],
-        machine_foot: Tuple[float, float],
-        frame_wh: Tuple[int, int],
-    ) -> Tuple[float, Optional[float]]:
+        person_foot: tuple[float, float],
+        machine_foot: tuple[float, float],
+        frame_wh: tuple[int, int],
+    ) -> tuple[float, float | None]:
         """
         Compute pixel distance and real-world distance.
 
@@ -227,19 +237,25 @@ class ProximityEngine:
             (pixel_dist, real_dist_metres or None)
         """
         px_dist = pixel_distance(
-            person_foot[0], person_foot[1],
-            machine_foot[0], machine_foot[1],
+            person_foot[0],
+            person_foot[1],
+            machine_foot[0],
+            machine_foot[1],
         )
 
         if self._calibration:
             try:
                 real_dist = self._calibration.real_distance_metres(
-                    person_foot[0], person_foot[1],
-                    machine_foot[0], machine_foot[1],
+                    person_foot[0],
+                    person_foot[1],
+                    machine_foot[0],
+                    machine_foot[1],
                 )
                 # Validate result
                 if real_dist < 0 or real_dist > 1000:  # Reasonable bounds
-                    logger.debug("Homography distance out of bounds: {}m — using ppm fallback", real_dist)
+                    logger.debug(
+                        "Homography distance out of bounds: {}m — using ppm fallback", real_dist
+                    )
                     raise ValueError("Invalid distance")
                 return px_dist, real_dist
             except Exception as exc:
@@ -257,10 +273,10 @@ class ProximityEngine:
 
     def _should_alert(
         self,
-        real_dist_m: Optional[float],
+        real_dist_m: float | None,
         px_dist: float,
-        frame_wh: Tuple[int, int],
-    ) -> Optional[str]:
+        frame_wh: tuple[int, int],
+    ) -> str | None:
         """
         Determine alert level based on distance.
         Returns "CRITICAL", "WARNING", or None.
@@ -276,7 +292,7 @@ class ProximityEngine:
         fw = frame_wh[0]
         critical_px = fw * float(os.getenv("PROXIMITY_CRITICAL_PCT", "0.10"))
         warning_px = fw * float(os.getenv("PROXIMITY_WARNING_PCT", "0.25"))
-        
+
         if px_dist < critical_px:
             return "CRITICAL"
         if px_dist < warning_px:
@@ -286,10 +302,10 @@ class ProximityEngine:
     def evaluate(
         self,
         persons: list,  # List[TrackedDetection]
-        machines: List[MachineryDetection],
-        frame_wh: Tuple[int, int],
+        machines: list[MachineryDetection],
+        frame_wh: tuple[int, int],
         frame_idx: int = 0,
-    ) -> List[ProximityAlert]:
+    ) -> list[ProximityAlert]:
         """
         Evaluate all person ↔ machine pairs.
 
@@ -304,7 +320,7 @@ class ProximityEngine:
         """
         if not persons or not machines:
             return []
-        
+
         # Validate frame size
         fw, fh = frame_wh
         if fw <= 0 or fh <= 0:
@@ -316,14 +332,17 @@ class ProximityEngine:
 
         # Only check person-class detections
         person_classes = {
-            "person", "hardhat", "no hardhat",
-            "gloves", "no gloves", "goggles",
-            "no goggles", "boots", "no boots",
+            "person",
+            "hardhat",
+            "no hardhat",
+            "gloves",
+            "no gloves",
+            "goggles",
+            "no goggles",
+            "boots",
+            "no boots",
         }
-        person_dets = [
-            d for d in persons
-            if d.class_name.lower() in person_classes
-        ]
+        person_dets = [d for d in persons if d.class_name.lower() in person_classes]
 
         for person in person_dets:
             person_foot = self._get_person_foot(person.bbox_xyxy, frame_wh)
@@ -350,10 +369,7 @@ class ProximityEngine:
                     continue
                 self._last_alert[pair_key] = now
 
-                dist_str = (
-                    f"{real_dist:.1f}m" if real_dist is not None
-                    else f"{px_dist:.0f}px"
-                )
+                dist_str = f"{real_dist:.1f}m" if real_dist is not None else f"{px_dist:.0f}px"
 
                 alert = ProximityAlert(
                     person_track_id=person.track_id,
@@ -388,8 +404,8 @@ class ProximityEngine:
     def draw_proximity_lines(
         self,
         frame: np.ndarray,
-        alerts: List[ProximityAlert],
-        machines: List[MachineryDetection],
+        alerts: list[ProximityAlert],
+        machines: list[MachineryDetection],
     ) -> np.ndarray:
         """
         Draw machinery bounding boxes and proximity lines on frame.
@@ -404,7 +420,7 @@ class ProximityEngine:
         """
         # Draw all machinery boxes
         for machine in machines:
-            x1, y1, x2, y2 = [int(v) for v in machine.bbox_xyxy]
+            x1, y1, x2, y2 = (int(v) for v in machine.bbox_xyxy)
             # Validate coordinates before drawing
             if x1 < 0 or y1 < 0 or x2 > frame.shape[1] or y2 > frame.shape[0]:
                 continue
@@ -414,7 +430,10 @@ class ProximityEngine:
                 f"{machine.class_name} ID:{machine.track_id}",
                 (x1, max(y1 - 6, 12)),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.45, (0, 165, 255), 1, cv2.LINE_AA,
+                0.45,
+                (0, 165, 255),
+                1,
+                cv2.LINE_AA,
             )
 
         # Draw proximity alert lines
@@ -423,7 +442,7 @@ class ProximityEngine:
 
             p1 = (int(alert.person_foot[0]), int(alert.person_foot[1]))
             p2 = (int(alert.machine_foot[0]), int(alert.machine_foot[1]))
-            
+
             # Validate coordinates
             if p1[0] < 0 or p1[1] < 0 or p2[0] < 0 or p2[1] < 0:
                 continue
@@ -435,8 +454,7 @@ class ProximityEngine:
             # Dashed line effect using segments
             pts = np.linspace([p1[0], p1[1]], [p2[0], p2[1]], 20, dtype=int)
             for i in range(0, len(pts) - 1, 2):
-                cv2.line(frame, tuple(pts[i]), tuple(pts[i+1]),
-                         color, 2, cv2.LINE_AA)
+                cv2.line(frame, tuple(pts[i]), tuple(pts[i + 1]), color, 2, cv2.LINE_AA)
 
             # Distance label at midpoint
             mid_x = (p1[0] + p2[0]) // 2
@@ -448,20 +466,23 @@ class ProximityEngine:
             )
 
             # Label background
-            (lw, lh), _ = cv2.getTextSize(
-                label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1
-            )
+            (lw, lh), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
             cv2.rectangle(
                 frame,
-                (mid_x - lw//2 - 3, max(0, mid_y - lh - 4)),
-                (mid_x + lw//2 + 3, mid_y + 2),
-                color, -1,
+                (mid_x - lw // 2 - 3, max(0, mid_y - lh - 4)),
+                (mid_x + lw // 2 + 3, mid_y + 2),
+                color,
+                -1,
             )
             cv2.putText(
-                frame, label,
-                (mid_x - lw//2, mid_y - 2),
+                frame,
+                label,
+                (mid_x - lw // 2, mid_y - 2),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.5, (255, 255, 255), 1, cv2.LINE_AA,
+                0.5,
+                (255, 255, 255),
+                1,
+                cv2.LINE_AA,
             )
 
             # Alert badge
@@ -470,20 +491,26 @@ class ProximityEngine:
                 f"! {alert.alert_level}",
                 (p1[0] + 5, max(p1[1] - 8, 12)),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.5, color, 2, cv2.LINE_AA,
+                0.5,
+                color,
+                2,
+                cv2.LINE_AA,
             )
 
         return frame
 
-    def reset_debounce(self, person_track_id: Optional[int] = None, machine_track_id: Optional[int] = None) -> None:
+    def reset_debounce(
+        self, person_track_id: int | None = None, machine_track_id: int | None = None
+    ) -> None:
         """Reset debounce state for testing or reconfiguration."""
         if person_track_id is None and machine_track_id is None:
             self._last_alert.clear()
         else:
             keys_to_remove = [
-                k for k in self._last_alert
-                if (person_track_id is None or k[0] == person_track_id) and
-                   (machine_track_id is None or k[1] == machine_track_id)
+                k
+                for k in self._last_alert
+                if (person_track_id is None or k[0] == person_track_id)
+                and (machine_track_id is None or k[1] == machine_track_id)
             ]
             for k in keys_to_remove:
                 del self._last_alert[k]
@@ -505,7 +532,7 @@ class ProximityEngine:
 
 
 # ── Singleton with lazy initialization ───────────────────────
-_proximity_engine_instance: Optional[ProximityEngine] = None
+_proximity_engine_instance: ProximityEngine | None = None
 
 
 def get_proximity_engine(**kwargs) -> ProximityEngine:

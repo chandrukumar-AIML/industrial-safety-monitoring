@@ -22,30 +22,29 @@ Enterprise use case:
 
 from __future__ import annotations
 
-from typing import List, Optional
-
 from fastapi import APIRouter, Depends, HTTPException, Query
+from loguru import logger
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import text
 from sqlmodel.ext.asyncio.session import AsyncSession
-from loguru import logger
 
-from ..database import get_session
 from ..auth.rbac import Role, require_role
+from ..database import get_session
 
 router = APIRouter(prefix="/sites", tags=["sites"])
 
 
 # ── Models ────────────────────────────────────────────────────
 
+
 class SiteCreateRequest(BaseModel):
     site_id: str = Field(min_length=2, max_length=50, pattern=r"^[a-z0-9_-]+$")
     site_name: str = Field(min_length=1, max_length=100)
-    location: Optional[str] = Field(default=None, max_length=200)
-    country: Optional[str] = Field(default=None, max_length=50)
+    location: str | None = Field(default=None, max_length=200)
+    country: str | None = Field(default=None, max_length=50)
     timezone: str = Field(default="UTC", max_length=50)
-    industry_type: Optional[str] = Field(default=None, max_length=50)
-    contact_email: Optional[str] = Field(default=None, max_length=200)
+    industry_type: str | None = Field(default=None, max_length=50)
+    contact_email: str | None = Field(default=None, max_length=200)
     active: bool = True
 
     @field_validator("site_id")
@@ -58,16 +57,17 @@ class SiteOut(BaseModel):
     id: int
     site_id: str
     site_name: str
-    location: Optional[str]
-    country: Optional[str]
+    location: str | None
+    country: str | None
     timezone: str
-    industry_type: Optional[str]
-    contact_email: Optional[str]
+    industry_type: str | None
+    contact_email: str | None
     active: bool
     created_at: str
 
 
 # ── Endpoints ─────────────────────────────────────────────────
+
 
 @router.post("", status_code=201, response_model=SiteOut)
 async def create_site(
@@ -122,7 +122,7 @@ async def create_site(
     }
 
 
-@router.get("", response_model=List[SiteOut])
+@router.get("", response_model=list[SiteOut])
 async def list_sites(
     active_only: bool = Query(default=True),
     limit: int = Query(default=100, ge=1, le=500),
@@ -141,10 +141,7 @@ async def list_sites(
         """),
         {"limit": limit, "offset": offset},
     )
-    return [
-        {**dict(r), "created_at": str(r["created_at"])}
-        for r in result.mappings().all()
-    ]
+    return [{**dict(r), "created_at": str(r["created_at"])} for r in result.mappings().all()]
 
 
 @router.get("/{site_id_or_int}", response_model=SiteOut)

@@ -17,13 +17,12 @@ Enable via: DEMO_MODE=true in .env
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 import random
 import time
-from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from loguru import logger
 
@@ -35,17 +34,33 @@ DEMO_CAMERAS = int(os.getenv("DEMO_CAMERAS", "4"))
 
 # ── Constants ─────────────────────────────────────────────────
 _PPE_CLASSES = [
-    "no helmet", "no gloves", "no goggles", "no boots",
-    "no mask", "no vest", "helmet", "gloves", "goggles",
+    "no helmet",
+    "no gloves",
+    "no goggles",
+    "no boots",
+    "no mask",
+    "no vest",
+    "helmet",
+    "gloves",
+    "goggles",
 ]
 _VIOLATION_CLASSES = [c for c in _PPE_CLASSES if c.startswith("no")]
 _ZONES = ["Zone-A (Welding)", "Zone-B (Chemical)", "Zone-C (Loading Dock)", "Zone-D (Assembly)"]
 _ZONE_IDS = ["zone-a", "zone-b", "zone-c", "zone-d"]
 _ZONE_TYPES = ["danger", "restricted", "danger", "safe"]
 _WORKER_NAMES = [
-    "Arjun Kumar", "Priya Sharma", "Ravi Patel", "Anitha Raj",
-    "Karthik Nair", "Meena Devi", "Suresh Babu", "Lakshmi Rao",
-    "Vikram Singh", "Deepa Menon", "Sanjay Gupta", "Pooja Iyer",
+    "Arjun Kumar",
+    "Priya Sharma",
+    "Ravi Patel",
+    "Anitha Raj",
+    "Karthik Nair",
+    "Meena Devi",
+    "Suresh Babu",
+    "Lakshmi Rao",
+    "Vikram Singh",
+    "Deepa Menon",
+    "Sanjay Gupta",
+    "Pooja Iyer",
 ]
 _DEPARTMENTS = ["Welding", "Chemical Handling", "Logistics", "Assembly", "Quality Control"]
 _CAMERA_IDS = ["cam-01", "cam-02", "cam-03", "cam-04"]
@@ -56,6 +71,7 @@ _SEVERITY_LEVELS = ["LOW", "MEDIUM", "HIGH", "CRITICAL"]
 @dataclass
 class DemoStats:
     """Running stats for the demo session."""
+
     total_violations: int = 0
     total_fire_alerts: int = 0
     total_pose_alerts: int = 0
@@ -69,7 +85,8 @@ _demo_stats = DemoStats()
 
 # ── Synthetic data generators ─────────────────────────────────
 
-def generate_violation_event(frame_idx: int = 0) -> Dict[str, Any]:
+
+def generate_violation_event(frame_idx: int = 0) -> dict[str, Any]:
     """Generate one realistic PPE violation event."""
     track_id = random.randint(1, DEMO_WORKERS)
     zone_idx = random.randint(0, len(_ZONES) - 1)
@@ -91,89 +108,93 @@ def generate_violation_event(frame_idx: int = 0) -> Dict[str, Any]:
         "bbox_y2": round(random.uniform(0.5, 0.9), 3),
         "severity": _get_severity(zone_idx, violation_class),
         "acknowledged": False,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "demo": True,
     }
 
 
-def generate_worker_profiles() -> List[Dict[str, Any]]:
+def generate_worker_profiles() -> list[dict[str, Any]]:
     """Generate synthetic worker profiles with realistic risk distribution."""
     profiles = []
     for i, name in enumerate(_WORKER_NAMES[:DEMO_WORKERS]):
         risk_score = round(random.triangular(0, 100, 20), 1)  # skewed low
         risk_level = _risk_level(risk_score)
-        profiles.append({
-            "worker_id": f"W{1000 + i}",
-            "full_name": name,
-            "department": random.choice(_DEPARTMENTS),
-            "shift": random.choice(["morning", "afternoon", "night"]),
-            "role": random.choice(["operator", "supervisor", "technician"]),
-            "risk_score": risk_score,
-            "risk_level": risk_level,
-            "hr_alerted": risk_score > 75,
-            "active": True,
-            "enrolled": random.random() > 0.2,
-            "photo_path": None,
-            "created_at": (
-                datetime.now(timezone.utc) - timedelta(days=random.randint(30, 365))
-            ).isoformat(),
-            "demo": True,
-        })
+        profiles.append(
+            {
+                "worker_id": f"W{1000 + i}",
+                "full_name": name,
+                "department": random.choice(_DEPARTMENTS),
+                "shift": random.choice(["morning", "afternoon", "night"]),
+                "role": random.choice(["operator", "supervisor", "technician"]),
+                "risk_score": risk_score,
+                "risk_level": risk_level,
+                "hr_alerted": risk_score > 75,
+                "active": True,
+                "enrolled": random.random() > 0.2,
+                "photo_path": None,
+                "created_at": (
+                    datetime.now(UTC) - timedelta(days=random.randint(30, 365))
+                ).isoformat(),
+                "demo": True,
+            }
+        )
     return sorted(profiles, key=lambda x: x["risk_score"], reverse=True)
 
 
-def generate_zone_definitions() -> List[Dict[str, Any]]:
+def generate_zone_definitions() -> list[dict[str, Any]]:
     """Generate synthetic zone definitions."""
     zones = []
-    for i, (zone_id, zone_name, zone_type) in enumerate(
-        zip(_ZONE_IDS, _ZONES, _ZONE_TYPES)
-    ):
+    for i, (zone_id, zone_name, zone_type) in enumerate(zip(_ZONE_IDS, _ZONES, _ZONE_TYPES)):
         # Generate a simple rectangular polygon
         x_start = 0.1 + i * 0.2
         y_start = 0.1
-        zones.append({
-            "id": i + 1,
-            "zone_id": zone_id,
-            "zone_name": zone_name,
-            "zone_type": zone_type,
-            "camera_id": _CAMERA_IDS[i % len(_CAMERA_IDS)],
-            "polygon_norm": [
-                [x_start, y_start],
-                [x_start + 0.15, y_start],
-                [x_start + 0.15, y_start + 0.6],
-                [x_start, y_start + 0.6],
-            ],
-            "required_ppe": _zone_ppe(zone_type),
-            "alert_enabled": True,
-            "dwell_threshold_s": 2.0,
-            "color_hex": "#ef4444" if zone_type == "danger" else "#f97316",
-            "active": True,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "demo": True,
-        })
+        zones.append(
+            {
+                "id": i + 1,
+                "zone_id": zone_id,
+                "zone_name": zone_name,
+                "zone_type": zone_type,
+                "camera_id": _CAMERA_IDS[i % len(_CAMERA_IDS)],
+                "polygon_norm": [
+                    [x_start, y_start],
+                    [x_start + 0.15, y_start],
+                    [x_start + 0.15, y_start + 0.6],
+                    [x_start, y_start + 0.6],
+                ],
+                "required_ppe": _zone_ppe(zone_type),
+                "alert_enabled": True,
+                "dwell_threshold_s": 2.0,
+                "color_hex": "#ef4444" if zone_type == "danger" else "#f97316",
+                "active": True,
+                "created_at": datetime.now(UTC).isoformat(),
+                "demo": True,
+            }
+        )
     return zones
 
 
-def generate_camera_list() -> List[Dict[str, Any]]:
+def generate_camera_list() -> list[dict[str, Any]]:
     """Generate synthetic camera list."""
     cameras = []
     for i, (cam_id, cam_name) in enumerate(zip(_CAMERA_IDS, _CAMERA_NAMES)):
-        cameras.append({
-            "camera_id": cam_id,
-            "name": cam_name,
-            "url": f"rtsp://demo:demo@192.168.1.{100+i}:554/stream",
-            "status": "online" if random.random() > 0.1 else "offline",
-            "fps": round(random.uniform(22, 30), 1),
-            "resolution": "1920x1080",
-            "location": _ZONES[i],
-            "demo": True,
-        })
+        cameras.append(
+            {
+                "camera_id": cam_id,
+                "name": cam_name,
+                "url": f"rtsp://demo:demo@192.168.1.{100+i}:554/stream",
+                "status": "online" if random.random() > 0.1 else "offline",
+                "fps": round(random.uniform(22, 30), 1),
+                "resolution": "1920x1080",
+                "location": _ZONES[i],
+                "demo": True,
+            }
+        )
     return cameras
 
 
-def generate_dashboard_stats() -> Dict[str, Any]:
+def generate_dashboard_stats() -> dict[str, Any]:
     """Generate realistic dashboard KPI stats."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return {
         "violations_today": random.randint(3, 24),
         "violations_this_week": random.randint(15, 80),
@@ -190,27 +211,29 @@ def generate_dashboard_stats() -> Dict[str, Any]:
     }
 
 
-def generate_violation_history(days: int = 30) -> List[Dict[str, Any]]:
+def generate_violation_history(days: int = 30) -> list[dict[str, Any]]:
     """Generate 30-day violation history for analytics charts."""
     history = []
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     for day in range(days, 0, -1):
         date = now - timedelta(days=day)
         # Realistic pattern: more violations mid-week, fewer on weekends
         weekday_factor = 1.0 if date.weekday() < 5 else 0.4
         base = random.randint(2, 15)
-        history.append({
-            "date": date.date().isoformat(),
-            "violations": int(base * weekday_factor),
-            "compliance_score": round(random.uniform(75, 95), 1),
-            "high_risk": random.randint(0, 3),
-            "fire_alerts": 1 if random.random() < 0.05 else 0,
-            "demo": True,
-        })
+        history.append(
+            {
+                "date": date.date().isoformat(),
+                "violations": int(base * weekday_factor),
+                "compliance_score": round(random.uniform(75, 95), 1),
+                "high_risk": random.randint(0, 3),
+                "fire_alerts": 1 if random.random() < 0.05 else 0,
+                "demo": True,
+            }
+        )
     return history
 
 
-def generate_compliance_by_class() -> Dict[str, int]:
+def generate_compliance_by_class() -> dict[str, int]:
     """Generate violation counts by PPE class."""
     return {
         "no helmet": random.randint(5, 25),
@@ -222,9 +245,9 @@ def generate_compliance_by_class() -> Dict[str, int]:
     }
 
 
-def generate_weekly_report_summary() -> Dict[str, Any]:
+def generate_weekly_report_summary() -> dict[str, Any]:
     """Generate demo weekly report data."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     week_start = now - timedelta(days=7)
     return {
         "id": 42,
@@ -253,42 +276,50 @@ def generate_weekly_report_summary() -> Dict[str, Any]:
     }
 
 
-def generate_fire_alert() -> Dict[str, Any]:
+def generate_fire_alert() -> dict[str, Any]:
     """Generate a demo fire/smoke detection event."""
     return {
         "id": random.randint(1000, 9999),
         "hazard_type": random.choice(["fire", "smoke"]),
         "confidence": round(random.uniform(0.72, 0.96), 3),
-        "bbox_x1": 0.3, "bbox_y1": 0.2, "bbox_x2": 0.7, "bbox_y2": 0.8,
+        "bbox_x1": 0.3,
+        "bbox_y1": 0.2,
+        "bbox_x2": 0.7,
+        "bbox_y2": 0.8,
         "zone_id": "zone-b",
         "frame_idx": random.randint(1000, 9999),
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "acknowledged": False,
         "demo": True,
     }
 
 
-def generate_pose_hazards() -> List[Dict[str, Any]]:
+def generate_pose_hazards() -> list[dict[str, Any]]:
     """Generate demo pose hazard events."""
     hazards = []
     for _ in range(random.randint(1, 4)):
-        hazards.append({
-            "id": random.randint(100, 999),
-            "track_id": random.randint(1, DEMO_WORKERS),
-            "hazard_type": random.choice(["dangerous_bending", "fatigue", "fall_risk", "reaching"]),
-            "severity": random.choice(["HIGH", "CRITICAL"]),
-            "confidence": round(random.uniform(0.65, 0.95), 3),
-            "zone_id": random.choice(_ZONE_IDS),
-            "frame_idx": random.randint(1000, 9999),
-            "landmark_data": {},
-            "combined_alert": random.random() > 0.7,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "demo": True,
-        })
+        hazards.append(
+            {
+                "id": random.randint(100, 999),
+                "track_id": random.randint(1, DEMO_WORKERS),
+                "hazard_type": random.choice(
+                    ["dangerous_bending", "fatigue", "fall_risk", "reaching"]
+                ),
+                "severity": random.choice(["HIGH", "CRITICAL"]),
+                "confidence": round(random.uniform(0.65, 0.95), 3),
+                "zone_id": random.choice(_ZONE_IDS),
+                "frame_idx": random.randint(1000, 9999),
+                "landmark_data": {},
+                "combined_alert": random.random() > 0.7,
+                "timestamp": datetime.now(UTC).isoformat(),
+                "demo": True,
+            }
+        )
     return hazards
 
 
 # ── Async demo stream generator ───────────────────────────────
+
 
 async def demo_violation_stream(callback, stop_event: asyncio.Event):
     """
@@ -312,6 +343,7 @@ async def demo_violation_stream(callback, stop_event: asyncio.Event):
 
 # ── Helpers ──────────────────────────────────────────────────
 
+
 def _get_severity(zone_idx: int, violation_class: str) -> str:
     zone_type = _ZONE_TYPES[zone_idx]
     if zone_type == "danger":
@@ -322,13 +354,16 @@ def _get_severity(zone_idx: int, violation_class: str) -> str:
 
 
 def _risk_level(score: float) -> str:
-    if score >= 75: return "CRITICAL"
-    if score >= 50: return "HIGH"
-    if score >= 25: return "MEDIUM"
+    if score >= 75:
+        return "CRITICAL"
+    if score >= 50:
+        return "HIGH"
+    if score >= 25:
+        return "MEDIUM"
     return "LOW"
 
 
-def _zone_ppe(zone_type: str) -> List[str]:
+def _zone_ppe(zone_type: str) -> list[str]:
     if zone_type == "danger":
         return ["helmet", "gloves", "goggles", "boots", "mask"]
     if zone_type == "restricted":

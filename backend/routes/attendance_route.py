@@ -19,39 +19,41 @@ Endpoints:
   GET  /attendance/active           → Currently on-site workers
   POST /attendance/muster           → Muster drill — count all on-site
 """
-from datetime import datetime, timezone, timedelta
-from typing import Optional
+
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from loguru import logger
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlmodel.ext.asyncio.session import AsyncSession
-from loguru import logger
 
 from backend.database import get_session
-from backend.middleware.rate_limiter import limiter, LIMIT_DEFAULT
+from backend.middleware.rate_limiter import LIMIT_DEFAULT, limiter
 
 router = APIRouter(prefix="/attendance", tags=["attendance"])
 
 
 # ── Request models ────────────────────────────────────────────
 
+
 class CheckInRequest(BaseModel):
     worker_id: str = Field(min_length=1, max_length=64)
-    org_id: Optional[str] = Field(default=None, max_length=64)
-    site_id: Optional[str] = Field(default=None, max_length=50)
-    shift_id: Optional[int] = Field(default=None)
+    org_id: str | None = Field(default=None, max_length=64)
+    site_id: str | None = Field(default=None, max_length=50)
+    shift_id: int | None = Field(default=None)
     entry_method: str = Field(default="manual", pattern="^(face_recognition|manual|qr)$")
-    entry_camera_id: Optional[str] = Field(default=None, max_length=64)
+    entry_camera_id: str | None = Field(default=None, max_length=64)
 
 
 class CheckOutRequest(BaseModel):
     worker_id: str = Field(min_length=1, max_length=64)
-    org_id: Optional[str] = Field(default=None, max_length=64)
-    exit_camera_id: Optional[str] = Field(default=None, max_length=64)
+    org_id: str | None = Field(default=None, max_length=64)
+    exit_camera_id: str | None = Field(default=None, max_length=64)
 
 
 # ── Routes ────────────────────────────────────────────────────
+
 
 @router.post("/checkin", status_code=201)
 @limiter.limit(LIMIT_DEFAULT)
@@ -62,38 +64,47 @@ async def check_in(
 ):
     """Record worker check-in."""
     # Check if already checked in today (no checkout)
-    today = datetime.now(timezone.utc).date().isoformat()
-    result = await session.exec(text("""
+    today = datetime.now(UTC).date().isoformat()
+    result = await session.exec(
+        text("""
         SELECT id FROM worker_attendance
         WHERE worker_id = :worker_id
           AND check_in >= :today
           AND check_out IS NULL
         LIMIT 1
-    """).bindparams(worker_id=body.worker_id, today=today))
+    """).bindparams(worker_id=body.worker_id, today=today)
+    )
 
     if result.fetchone():
         raise HTTPException(
             status_code=409,
-            detail=f"Worker '{body.worker_id}' is already checked in. Use /checkout first."
+            detail=f"Worker '{body.worker_id}' is already checked in. Use /checkout first.",
         )
 
-    now = datetime.now(timezone.utc)
-    await session.exec(text("""
+    now = datetime.now(UTC)
+    await session.exec(
+        text("""
         INSERT INTO worker_attendance
             (worker_id, org_id, site_id, shift_id, check_in, entry_method, entry_camera_id)
         VALUES
             (:worker_id, :org_id, :site_id, :shift_id, :check_in, :entry_method, :entry_camera_id)
     """).bindparams(
-        worker_id=body.worker_id,
-        org_id=body.org_id,
-        site_id=body.site_id,
-        shift_id=body.shift_id,
-        check_in=now.isoformat(),
-        entry_method=body.entry_method,
-        entry_camera_id=body.entry_camera_id,
-    ))
+            worker_id=body.worker_id,
+            org_id=body.org_id,
+            site_id=body.site_id,
+            shift_id=body.shift_id,
+            check_in=now.isoformat(),
+            entry_method=body.entry_method,
+            entry_camera_id=body.entry_camera_id,
+        )
+    )
 
-    logger.info("Worker checked in | id={} | method={} | site={}", body.worker_id, body.entry_method, body.site_id)
+    logger.info(
+        "Worker checked in | id={} | method={} | site={}",
+        body.worker_id,
+        body.entry_method,
+        body.site_id,
+    )
     return {
         "worker_id": body.worker_id,
         "status": "checked_in",
@@ -110,45 +121,48 @@ async def check_out(
     session: AsyncSession = Depends(get_session),
 ):
     """Record worker check-out."""
-    today = datetime.now(timezone.utc).date().isoformat()
+    today = datetime.now(UTC).date().isoformat()
 
     # Find open check-in
-    result = await session.exec(text("""
+    result = await session.exec(
+        text("""
         SELECT id, check_in FROM worker_attendance
         WHERE worker_id = :worker_id
           AND check_in >= :today
           AND check_out IS NULL
         ORDER BY check_in DESC LIMIT 1
-    """).bindparams(worker_id=body.worker_id, today=today))
+    """).bindparams(worker_id=body.worker_id, today=today)
+    )
 
     row = result.fetchone()
     if not row:
         raise HTTPException(
-            status_code=404,
-            detail=f"No active check-in found for worker '{body.worker_id}' today"
+            status_code=404, detail=f"No active check-in found for worker '{body.worker_id}' today"
         )
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     # Calculate hours
     try:
         check_in = datetime.fromisoformat(str(row.check_in).replace("Z", "+00:00"))
         if check_in.tzinfo is None:
-            check_in = check_in.replace(tzinfo=timezone.utc)
+            check_in = check_in.replace(tzinfo=UTC)
         hours_worked = round((now - check_in).total_seconds() / 3600, 2)
     except (ValueError, TypeError):
         hours_worked = None
 
-    await session.exec(text("""
+    await session.exec(
+        text("""
         UPDATE worker_attendance
         SET check_out = :check_out,
             exit_camera_id = :exit_camera_id
         WHERE id = :id
     """).bindparams(
-        id=row.id,
-        check_out=now.isoformat(),
-        exit_camera_id=body.exit_camera_id,
-    ))
+            id=row.id,
+            check_out=now.isoformat(),
+            exit_camera_id=body.exit_camera_id,
+        )
+    )
 
     logger.info("Worker checked out | id={} | hours={}", body.worker_id, hours_worked)
     return {
@@ -163,18 +177,19 @@ async def check_out(
 @limiter.limit(LIMIT_DEFAULT)
 async def get_headcount(
     request: Request,
-    site_id: Optional[str] = None,
+    site_id: str | None = None,
     session: AsyncSession = Depends(get_session),
 ):
     """Real-time headcount — workers currently on-site (checked in, not checked out)."""
-    today = datetime.now(timezone.utc).date().isoformat()
+    today = datetime.now(UTC).date().isoformat()
 
     where = "AND site_id = :site_id" if site_id else ""
     params = {"today": today}
     if site_id:
         params["site_id"] = site_id
 
-    result = await session.exec(text(f"""
+    result = await session.exec(
+        text(f"""
         SELECT
             COALESCE(site_id, 'unknown') as site,
             COUNT(*) as on_site
@@ -182,7 +197,8 @@ async def get_headcount(
         WHERE check_in >= :today AND check_out IS NULL {where}
         GROUP BY site_id
         ORDER BY on_site DESC
-    """).bindparams(**params))
+    """).bindparams(**params)
+    )
 
     rows = result.fetchall()
     total_on_site = sum(row.on_site for row in rows)
@@ -190,7 +206,7 @@ async def get_headcount(
     return {
         "total_on_site": total_on_site,
         "by_site": [dict(row._mapping) for row in rows],
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
     }
 
 
@@ -198,12 +214,12 @@ async def get_headcount(
 @limiter.limit(LIMIT_DEFAULT)
 async def get_active_workers(
     request: Request,
-    site_id: Optional[str] = None,
-    org_id: Optional[str] = None,
+    site_id: str | None = None,
+    org_id: str | None = None,
     session: AsyncSession = Depends(get_session),
 ):
     """List all workers currently on site (checked in without checkout)."""
-    today = datetime.now(timezone.utc).date().isoformat()
+    today = datetime.now(UTC).date().isoformat()
 
     conditions = ["wa.check_in >= :today", "wa.check_out IS NULL"]
     params = {"today": today}
@@ -217,7 +233,8 @@ async def get_active_workers(
 
     where = "WHERE " + " AND ".join(conditions)
 
-    result = await session.exec(text(f"""
+    result = await session.exec(
+        text(f"""
         SELECT wa.worker_id, wa.site_id, wa.check_in,
                wa.entry_method, wa.entry_camera_id,
                wp.full_name, wp.department, wp.shift
@@ -226,17 +243,18 @@ async def get_active_workers(
         {where}
         ORDER BY wa.check_in DESC
         LIMIT 500
-    """).bindparams(**params))
+    """).bindparams(**params)
+    )
 
     rows = result.fetchall()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     workers = []
     for row in rows:
         d = dict(row._mapping)
         try:
             ci = datetime.fromisoformat(str(d["check_in"]).replace("Z", "+00:00"))
             if ci.tzinfo is None:
-                ci = ci.replace(tzinfo=timezone.utc)
+                ci = ci.replace(tzinfo=UTC)
             d["hours_on_site"] = round((now - ci).total_seconds() / 3600, 2)
         except (ValueError, TypeError):
             d["hours_on_site"] = None
@@ -253,18 +271,19 @@ async def get_active_workers(
 @limiter.limit(LIMIT_DEFAULT)
 async def get_today_attendance(
     request: Request,
-    site_id: Optional[str] = None,
+    site_id: str | None = None,
     session: AsyncSession = Depends(get_session),
 ):
     """Today's full attendance log (all check-ins and check-outs)."""
-    today = datetime.now(timezone.utc).date().isoformat()
+    today = datetime.now(UTC).date().isoformat()
     params = {"today": today}
     where_extra = ""
     if site_id:
         where_extra = " AND site_id = :site_id"
         params["site_id"] = site_id
 
-    result = await session.exec(text(f"""
+    result = await session.exec(
+        text(f"""
         SELECT wa.worker_id, wa.site_id, wa.check_in, wa.check_out,
                wa.entry_method, wa.shift_id,
                wp.full_name, wp.department
@@ -273,7 +292,8 @@ async def get_today_attendance(
         WHERE wa.check_in >= :today {where_extra}
         ORDER BY wa.check_in DESC
         LIMIT 1000
-    """).bindparams(**params))
+    """).bindparams(**params)
+    )
 
     rows = result.fetchall()
 
@@ -299,9 +319,10 @@ async def get_worker_attendance(
     session: AsyncSession = Depends(get_session),
 ):
     """Get attendance history for a specific worker."""
-    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    since = (datetime.now(UTC) - timedelta(days=days)).isoformat()
 
-    result = await session.exec(text("""
+    result = await session.exec(
+        text("""
         SELECT wa.worker_id, wa.site_id, wa.check_in, wa.check_out,
                wa.entry_method, wa.shift_id,
                wp.full_name, wp.department, wp.shift
@@ -310,7 +331,8 @@ async def get_worker_attendance(
         WHERE wa.worker_id = :worker_id AND wa.check_in >= :since
         ORDER BY wa.check_in DESC
         LIMIT 200
-    """).bindparams(worker_id=worker_id, since=since))
+    """).bindparams(worker_id=worker_id, since=since)
+    )
 
     rows = result.fetchall()
 
@@ -322,8 +344,10 @@ async def get_worker_attendance(
             try:
                 ci = datetime.fromisoformat(str(d["check_in"]).replace("Z", "+00:00"))
                 co = datetime.fromisoformat(str(d["check_out"]).replace("Z", "+00:00"))
-                if ci.tzinfo is None: ci = ci.replace(tzinfo=timezone.utc)
-                if co.tzinfo is None: co = co.replace(tzinfo=timezone.utc)
+                if ci.tzinfo is None:
+                    ci = ci.replace(tzinfo=UTC)
+                if co.tzinfo is None:
+                    co = co.replace(tzinfo=UTC)
                 hours = round((co - ci).total_seconds() / 3600, 2)
                 d["hours_worked"] = hours
                 total_hours += hours
@@ -344,28 +368,30 @@ async def get_worker_attendance(
 @limiter.limit(LIMIT_DEFAULT)
 async def muster_drill(
     request: Request,
-    site_id: Optional[str] = None,
+    site_id: str | None = None,
     session: AsyncSession = Depends(get_session),
 ):
     """
     Muster drill — snapshot of all workers currently on site.
     Used during emergency evacuations to verify headcount.
     """
-    today = datetime.now(timezone.utc).date().isoformat()
+    today = datetime.now(UTC).date().isoformat()
     params = {"today": today}
     where_extra = ""
     if site_id:
         where_extra = " AND wa.site_id = :site_id"
         params["site_id"] = site_id
 
-    result = await session.exec(text(f"""
+    result = await session.exec(
+        text(f"""
         SELECT wa.worker_id, wa.site_id, wa.check_in, wa.entry_method,
                wp.full_name, wp.department, wp.shift
         FROM worker_attendance wa
         LEFT JOIN worker_profiles wp ON wp.worker_id = wa.worker_id
         WHERE wa.check_in >= :today AND wa.check_out IS NULL {where_extra}
         ORDER BY wa.site_id, wa.check_in
-    """).bindparams(**params))
+    """).bindparams(**params)
+    )
 
     rows = result.fetchall()
     workers = [dict(row._mapping) for row in rows]
@@ -373,7 +399,7 @@ async def muster_drill(
     logger.info("Muster drill | site={} | on_site={}", site_id or "all", len(workers))
 
     return {
-        "muster_time": datetime.now(timezone.utc).isoformat(),
+        "muster_time": datetime.now(UTC).isoformat(),
         "site_id": site_id or "all_sites",
         "total_on_site": len(workers),
         "workers": workers,

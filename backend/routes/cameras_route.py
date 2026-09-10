@@ -13,28 +13,26 @@ Camera registry CRUD + live feed endpoints.
 from __future__ import annotations
 
 import base64
-import os
 import re
-from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status, Response
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from fastapi import APIRouter, Depends, HTTPException, Response, status
+from loguru import logger
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import text
 from sqlmodel.ext.asyncio.session import AsyncSession
-from loguru import logger
 
-from ..database import get_session, AsyncSessionLocal
-from ..state import app_state
+from ..database import get_session
 
 router = APIRouter(prefix="/cameras", tags=["cameras"])
 
+
 # ── Request / Response models ─────────────────────────────────
 class CameraCreate(BaseModel):
-    camera_id: str = Field(min_length=1, max_length=64, pattern=r'^[a-zA-Z0-9_\-]+$')
+    camera_id: str = Field(min_length=1, max_length=64, pattern=r"^[a-zA-Z0-9_\-]+$")
     camera_name: str = Field(min_length=1, max_length=128)
     rtsp_url: str = Field(min_length=1)
     location: str = Field(default="", max_length=200)
-    zone_id: Optional[str] = Field(default=None, max_length=100)
+    zone_id: str | None = Field(default=None, max_length=100)
 
     @field_validator("rtsp_url")
     @classmethod
@@ -44,7 +42,9 @@ class CameraCreate(BaseModel):
         if v.isdigit():
             return v  # Allow integer device index for webcams
         if not any(v.startswith(p) for p in valid_prefixes):
-            raise ValueError("rtsp_url must start with rtsp://, rtmp://, http://, https://, or be a numeric device index")
+            raise ValueError(
+                "rtsp_url must start with rtsp://, rtmp://, http://, https://, or be a numeric device index"
+            )
         return v
 
 
@@ -53,9 +53,9 @@ class CameraOut(BaseModel):
     camera_name: str
     rtsp_url: str
     location: str
-    zone_id: Optional[str]
+    zone_id: str | None
     status: str
-    last_seen: Optional[str]
+    last_seen: str | None
     reconnect_count: int
     fps_actual: float
     created_at: str
@@ -68,7 +68,7 @@ class CameraGridOut(BaseModel):
     fps: float
     violation_count: int
     detection_count: int
-    jpeg_b64: Optional[str]
+    jpeg_b64: str | None
     location: str
 
 
@@ -76,7 +76,7 @@ class CameraGridOut(BaseModel):
 def _redact_rtsp(url: str) -> str:
     if not url or url.isdigit():
         return url
-    match = re.match(r'(rtsp[s]?|http[s]?)://([^@]+@)?(.+)', url)
+    match = re.match(r"(rtsp[s]?|http[s]?)://([^@]+@)?(.+)", url)
     if match:
         return f"{match.group(1)}://***@{match.group(3)}"
     return "***"
@@ -85,7 +85,7 @@ def _redact_rtsp(url: str) -> str:
 # ── Endpoints ─────────────────────────────────────────────────
 @router.get(
     "",
-    response_model=List[CameraOut],
+    response_model=list[CameraOut],
     summary="List all cameras",
 )
 async def list_cameras(
@@ -131,7 +131,7 @@ async def add_camera(
     # Check if already exists
     exists = await session.execute(
         text("SELECT 1 FROM camera_registry WHERE camera_id = :id AND status != 'disabled'"),
-        {"id": body.camera_id}
+        {"id": body.camera_id},
     )
     if exists.first():
         raise HTTPException(status.HTTP_409_CONFLICT, f"Camera '{body.camera_id}' already exists")
@@ -144,7 +144,7 @@ async def add_camera(
         zone_id=body.zone_id,
         status="active",
     )
-    
+
     # Insert into DB
     await session.execute(
         text("""
@@ -152,7 +152,7 @@ async def add_camera(
             (camera_id, camera_name, rtsp_url, location, zone_id, status)
             VALUES (:camera_id, :camera_name, :rtsp_url, :location, :zone_id, 'active')
         """),
-        config.model_dump(exclude={"status"})
+        config.model_dump(exclude={"status"}),
     )
     await session.commit()
 
@@ -171,6 +171,7 @@ async def add_camera(
         "created_at": "",
     }
 
+
 @router.delete(
     "/{camera_id}",
     status_code=status.HTTP_204_NO_CONTENT,
@@ -180,12 +181,13 @@ async def remove_camera(
     camera_id: str,
     session: AsyncSession = Depends(get_session),
 ) -> Response:
-
     from ..cameras.stream_manager import stream_manager
 
     result = await session.execute(
-        text("UPDATE camera_registry SET status='disabled', updated_at=NOW() WHERE camera_id=:id RETURNING 1"),
-        {"id": camera_id}
+        text(
+            "UPDATE camera_registry SET status='disabled', updated_at=NOW() WHERE camera_id=:id RETURNING 1"
+        ),
+        {"id": camera_id},
     )
 
     if not result.first():
@@ -199,9 +201,10 @@ async def remove_camera(
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
+
 @router.get(
     "/grid",
-    response_model=List[CameraGridOut],
+    response_model=list[CameraGridOut],
     summary="Camera grid data for dashboard",
 )
 async def camera_grid(
@@ -236,16 +239,18 @@ async def camera_grid(
             detections = latest_frame.detection_count
             fps = latest_frame.fps
 
-        output.append({
-            "camera_id": cam_id,
-            "camera_name": cam["camera_name"],
-            "status": cam["status"],
-            "fps": fps,
-            "violation_count": violations,
-            "detection_count": detections,
-            "jpeg_b64": jpeg_b64,
-            "location": cam["location"] or "",
-        })
+        output.append(
+            {
+                "camera_id": cam_id,
+                "camera_name": cam["camera_name"],
+                "status": cam["status"],
+                "fps": fps,
+                "violation_count": violations,
+                "detection_count": detections,
+                "jpeg_b64": jpeg_b64,
+                "location": cam["location"] or "",
+            }
+        )
 
     return output
 

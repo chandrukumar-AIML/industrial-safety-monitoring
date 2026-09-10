@@ -25,9 +25,9 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .drift_detector import DriftResult, detect_drift
-    from .inference_logger import DailyStatsAccumulator, stats_accumulator, flush_stats_to_db
-    from .reference_store import load_reference, save_reference
     from .drift_reporter import run_daily_drift_check
+    from .inference_logger import DailyStatsAccumulator, flush_stats_to_db, stats_accumulator
+    from .reference_store import load_reference, save_reference
 
 # ── Explicit public API ──────────────────────────────────────
 __all__ = [
@@ -37,19 +37,15 @@ __all__ = [
     "load_reference",
     "save_reference",
     "flush_stats_to_db",
-    
     # Classes
     "DriftResult",
     "DailyStatsAccumulator",
-    
     # Singletons
     "stats_accumulator",
-    
     # Exceptions
     "MonitoringError",
     "DriftDetectionError",
     "ReferenceStoreError",
-    
     # Config helpers
     "get_monitoring_config",
     "validate_monitoring_config",
@@ -63,9 +59,9 @@ __description__ = "Monitoring utilities for model drift detection and inference 
 # ── Config helpers ───────────────────────────────────────────
 def get_monitoring_config() -> dict:
     """Return current monitoring configuration."""
-    from .drift_detector import PSI_THRESHOLD, KS_PVALUE_THRESH
+    from .drift_detector import KS_PVALUE_THRESH, PSI_THRESHOLD
     from .reference_store import REFERENCE_PATH
-    
+
     return {
         "drift_detection": {
             "psi_threshold": PSI_THRESHOLD,
@@ -87,15 +83,19 @@ def validate_monitoring_config() -> list[str]:
     Returns list of warnings (empty = OK).
     """
     warnings = []
-    
+
     # Reference path
     ref_path = os.getenv("REFERENCE_STATS_PATH", "./monitoring/reference_stats.json")
     if not os.path.isabs(ref_path):
         ref_path = os.path.abspath(ref_path)
-    allowed_dirs = [os.path.abspath(d.strip()) for d in os.getenv("ALLOWED_MONITORING_DIRS", "./monitoring").split(",") if d.strip()]
+    allowed_dirs = [
+        os.path.abspath(d.strip())
+        for d in os.getenv("ALLOWED_MONITORING_DIRS", "./monitoring").split(",")
+        if d.strip()
+    ]
     if not any(ref_path.startswith(d) for d in allowed_dirs):
         warnings.append(f"REFERENCE_STATS_PATH not in allowed directories: {ref_path}")
-    
+
     # Thresholds
     try:
         psi_thresh = float(os.getenv("DRIFT_PSI_THRESHOLD", "0.2"))
@@ -103,41 +103,46 @@ def validate_monitoring_config() -> list[str]:
             warnings.append(f"DRIFT_PSI_THRESHOLD={psi_thresh} outside 0-1 range")
     except ValueError:
         warnings.append("DRIFT_PSI_THRESHOLD must be a float")
-    
+
     try:
         ks_pval = float(os.getenv("DRIFT_KS_PVALUE_THRESHOLD", "0.05"))
         if not 0 < ks_pval < 1:
             warnings.append(f"DRIFT_KS_PVALUE_THRESHOLD={ks_pval} outside 0-1 range")
     except ValueError:
         warnings.append("DRIFT_KS_PVALUE_THRESHOLD must be a float")
-    
+
     return warnings
 
 
 # ── Lazy loader for heavy imports ────────────────────────────
 def __getattr__(name: str) -> Any:
     """Lazy-load submodules only when accessed."""
-    
+
     if name in ("DriftResult", "detect_drift"):
         from . import drift_detector as module
+
         return getattr(module, name)
-    
+
     if name in ("DailyStatsAccumulator", "stats_accumulator", "flush_stats_to_db"):
         from . import inference_logger as module
+
         return getattr(module, name)
-    
+
     if name in ("load_reference", "save_reference"):
         from . import reference_store as module
+
         return getattr(module, name)
-    
+
     if name in ("run_daily_drift_check",):
         from . import drift_reporter as module
+
         return getattr(module, name)
-    
+
     if name in ("MonitoringError", "DriftDetectionError", "ReferenceStoreError"):
         from . import drift_detector as module
+
         return getattr(module, name)
-    
+
     raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
 
@@ -145,5 +150,6 @@ def __getattr__(name: str) -> Any:
 _monitoring_warnings = validate_monitoring_config()
 if _monitoring_warnings and os.getenv("MONITORING_STRICT_MODE", "false").lower() == "true":
     import warnings as _warnings
+
     for w in _monitoring_warnings:
         _warnings.warn(f"Monitoring config: {w}", RuntimeWarning, stacklevel=2)

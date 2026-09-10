@@ -16,21 +16,21 @@ Endpoints:
   POST /billing/webhook                 → Razorpay webhook receiver
   POST /billing/cancel/{org_id}         → Cancel subscription
 """
+
 import hashlib
 import hmac
 import json
 import os
-from datetime import datetime, timezone, timedelta
-from typing import Optional
+from datetime import UTC, datetime, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Header
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from loguru import logger
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlmodel.ext.asyncio.session import AsyncSession
-from loguru import logger
 
 from backend.database import get_session
-from backend.middleware.rate_limiter import limiter, LIMIT_DEFAULT
+from backend.middleware.rate_limiter import LIMIT_DEFAULT, limiter
 
 router = APIRouter(prefix="/billing", tags=["billing"])
 
@@ -40,7 +40,7 @@ PLANS = {
     "starter": {
         "name": "Starter",
         "price_inr_monthly": 4999,
-        "price_inr_annual": 49999,       # ~2 months free
+        "price_inr_annual": 49999,  # ~2 months free
         "max_cameras": 5,
         "max_sites": 1,
         "max_users": 10,
@@ -53,7 +53,7 @@ PLANS = {
             "90-day data retention",
         ],
         "razorpay_plan_id_monthly": os.getenv("RAZORPAY_PLAN_STARTER_MONTHLY", ""),
-        "razorpay_plan_id_annual":  os.getenv("RAZORPAY_PLAN_STARTER_ANNUAL", ""),
+        "razorpay_plan_id_annual": os.getenv("RAZORPAY_PLAN_STARTER_ANNUAL", ""),
     },
     "growth": {
         "name": "Growth",
@@ -75,7 +75,7 @@ PLANS = {
             "WhatsApp/Telegram alerts",
         ],
         "razorpay_plan_id_monthly": os.getenv("RAZORPAY_PLAN_GROWTH_MONTHLY", ""),
-        "razorpay_plan_id_annual":  os.getenv("RAZORPAY_PLAN_GROWTH_ANNUAL", ""),
+        "razorpay_plan_id_annual": os.getenv("RAZORPAY_PLAN_GROWTH_ANNUAL", ""),
     },
     "enterprise": {
         "name": "Enterprise",
@@ -98,13 +98,13 @@ PLANS = {
             "Unlimited data retention",
         ],
         "razorpay_plan_id_monthly": os.getenv("RAZORPAY_PLAN_ENTERPRISE_MONTHLY", ""),
-        "razorpay_plan_id_annual":  os.getenv("RAZORPAY_PLAN_ENTERPRISE_ANNUAL", ""),
+        "razorpay_plan_id_annual": os.getenv("RAZORPAY_PLAN_ENTERPRISE_ANNUAL", ""),
     },
 }
 
-RAZORPAY_KEY_ID     = os.getenv("RAZORPAY_KEY_ID", "")
+RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID", "")
 RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET", "")
-RAZORPAY_AVAILABLE  = bool(RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET)
+RAZORPAY_AVAILABLE = bool(RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET)
 
 
 def _get_razorpay_client():
@@ -113,6 +113,7 @@ def _get_razorpay_client():
         return None
     try:
         import razorpay
+
         return razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
     except ImportError:
         logger.warning("razorpay package not installed — pip install razorpay")
@@ -121,39 +122,43 @@ def _get_razorpay_client():
 
 # ── Request models ────────────────────────────────────────────
 
+
 class SubscribeRequest(BaseModel):
     org_id: str = Field(min_length=1, max_length=64)
     plan: str = Field(pattern="^(starter|growth|enterprise)$")
     billing_cycle: str = Field(default="monthly", pattern="^(monthly|annual)$")
-    customer_name: Optional[str] = Field(default=None, max_length=100)
-    customer_email: Optional[str] = Field(default=None, max_length=200)
-    customer_phone: Optional[str] = Field(default=None, max_length=15)
+    customer_name: str | None = Field(default=None, max_length=100)
+    customer_email: str | None = Field(default=None, max_length=200)
+    customer_phone: str | None = Field(default=None, max_length=15)
 
 
 # ── Routes ────────────────────────────────────────────────────
+
 
 @router.get("/plans")
 async def list_plans():
     """List all subscription plans with pricing and features."""
     result = []
     for plan_id, plan in PLANS.items():
-        result.append({
-            "plan_id": plan_id,
-            "name": plan["name"],
-            "pricing": {
-                "monthly_inr": plan["price_inr_monthly"],
-                "annual_inr": plan["price_inr_annual"],
-                "annual_savings_pct": round(
-                    (1 - plan["price_inr_annual"] / (plan["price_inr_monthly"] * 12)) * 100, 1
-                ),
-            },
-            "limits": {
-                "max_cameras": plan["max_cameras"],
-                "max_sites": plan["max_sites"],
-                "max_users": plan["max_users"],
-            },
-            "features": plan["features"],
-        })
+        result.append(
+            {
+                "plan_id": plan_id,
+                "name": plan["name"],
+                "pricing": {
+                    "monthly_inr": plan["price_inr_monthly"],
+                    "annual_inr": plan["price_inr_annual"],
+                    "annual_savings_pct": round(
+                        (1 - plan["price_inr_annual"] / (plan["price_inr_monthly"] * 12)) * 100, 1
+                    ),
+                },
+                "limits": {
+                    "max_cameras": plan["max_cameras"],
+                    "max_sites": plan["max_sites"],
+                    "max_users": plan["max_users"],
+                },
+                "features": plan["features"],
+            }
+        )
     return {"plans": result, "currency": "INR", "razorpay_available": RAZORPAY_AVAILABLE}
 
 
@@ -165,19 +170,23 @@ async def get_subscription(
     session: AsyncSession = Depends(get_session),
 ):
     """Get current subscription for an organization."""
-    result = await session.exec(text("""
+    result = await session.exec(
+        text("""
         SELECT bs.*, o.org_name, o.plan_status
         FROM billing_subscriptions bs
         JOIN organizations o ON o.org_id = bs.org_id
         WHERE bs.org_id = :org_id
-    """).bindparams(org_id=org_id))
+    """).bindparams(org_id=org_id)
+    )
     row = result.fetchone()
 
     if not row:
         # Check if org exists
-        org_result = await session.exec(text(
-            "SELECT org_id, plan, plan_status, trial_ends_at FROM organizations WHERE org_id = :org_id"
-        ).bindparams(org_id=org_id))
+        org_result = await session.exec(
+            text(
+                "SELECT org_id, plan, plan_status, trial_ends_at FROM organizations WHERE org_id = :org_id"
+            ).bindparams(org_id=org_id)
+        )
         org = org_result.fetchone()
         if not org:
             raise HTTPException(status_code=404, detail=f"Organization '{org_id}' not found")
@@ -212,8 +221,7 @@ async def subscribe(
         raise HTTPException(status_code=400, detail=f"Invalid plan: {body.plan}")
 
     amount_paise = (
-        plan["price_inr_annual"] if body.billing_cycle == "annual"
-        else plan["price_inr_monthly"]
+        plan["price_inr_annual"] if body.billing_cycle == "annual" else plan["price_inr_monthly"]
     ) * 100  # Razorpay uses paise
 
     razorpay_sub_id = None
@@ -226,16 +234,18 @@ async def subscribe(
             plan_key = f"razorpay_plan_id_{body.billing_cycle}"
             rz_plan_id = plan.get(plan_key, "")
             if rz_plan_id:
-                sub = rz_client.subscription.create({
-                    "plan_id": rz_plan_id,
-                    "total_count": 12 if body.billing_cycle == "monthly" else 1,
-                    "quantity": 1,
-                    "customer_notify": 1,
-                    "notify_info": {
-                        "notify_phone": body.customer_phone or "",
-                        "notify_email": body.customer_email or "",
-                    },
-                })
+                sub = rz_client.subscription.create(
+                    {
+                        "plan_id": rz_plan_id,
+                        "total_count": 12 if body.billing_cycle == "monthly" else 1,
+                        "quantity": 1,
+                        "customer_notify": 1,
+                        "notify_info": {
+                            "notify_phone": body.customer_phone or "",
+                            "notify_email": body.customer_email or "",
+                        },
+                    }
+                )
                 razorpay_sub_id = sub["id"]
                 payment_link = f"https://rzp.io/l/{razorpay_sub_id}"
                 logger.info("Razorpay subscription created: {}", razorpay_sub_id)
@@ -243,10 +253,13 @@ async def subscribe(
             logger.warning("Razorpay subscription creation failed: {}", str(exc)[:100])
 
     # Upsert billing_subscriptions record
-    period_start = datetime.now(timezone.utc)
-    period_end = period_start + (timedelta(days=365) if body.billing_cycle == "annual" else timedelta(days=30))
+    period_start = datetime.now(UTC)
+    period_end = period_start + (
+        timedelta(days=365) if body.billing_cycle == "annual" else timedelta(days=30)
+    )
 
-    await session.exec(text("""
+    await session.exec(
+        text("""
         INSERT INTO billing_subscriptions
             (org_id, plan, billing_cycle, amount_paise, currency, razorpay_sub_id,
              status, current_period_start, current_period_end)
@@ -262,31 +275,34 @@ async def subscribe(
             current_period_start = :period_start,
             current_period_end = :period_end
     """).bindparams(
-        org_id=body.org_id,
-        plan=body.plan,
-        billing_cycle=body.billing_cycle,
-        amount_paise=amount_paise,
-        razorpay_sub_id=razorpay_sub_id,
-        status="pending" if razorpay_sub_id else "active",
-        period_start=period_start.isoformat(),
-        period_end=period_end.isoformat(),
-    ))
+            org_id=body.org_id,
+            plan=body.plan,
+            billing_cycle=body.billing_cycle,
+            amount_paise=amount_paise,
+            razorpay_sub_id=razorpay_sub_id,
+            status="pending" if razorpay_sub_id else "active",
+            period_start=period_start.isoformat(),
+            period_end=period_end.isoformat(),
+        )
+    )
 
     # Update organization plan
     activate_status = "pending_payment" if razorpay_sub_id else "active"
-    await session.exec(text("""
+    await session.exec(
+        text("""
         UPDATE organizations
         SET plan = :plan, plan_status = :status,
             max_cameras = :max_cameras, max_sites = :max_sites, max_users = :max_users
         WHERE org_id = :org_id
     """).bindparams(
-        plan=body.plan,
-        status=activate_status,
-        max_cameras=plan["max_cameras"],
-        max_sites=plan["max_sites"],
-        max_users=plan["max_users"],
-        org_id=body.org_id,
-    ))
+            plan=body.plan,
+            status=activate_status,
+            max_cameras=plan["max_cameras"],
+            max_sites=plan["max_sites"],
+            max_users=plan["max_users"],
+            org_id=body.org_id,
+        )
+    )
 
     return {
         "org_id": body.org_id,
@@ -297,7 +313,8 @@ async def subscribe(
         "razorpay_subscription_id": razorpay_sub_id,
         "payment_link": payment_link,
         "message": (
-            f"Complete payment at {payment_link}" if payment_link
+            f"Complete payment at {payment_link}"
+            if payment_link
             else f"Plan '{body.plan}' activated (Razorpay not configured — demo mode)"
         ),
     }
@@ -306,7 +323,7 @@ async def subscribe(
 @router.post("/webhook")
 async def razorpay_webhook(
     request: Request,
-    x_razorpay_signature: Optional[str] = Header(None),
+    x_razorpay_signature: str | None = Header(None),
     session: AsyncSession = Depends(get_session),
 ):
     """
@@ -339,32 +356,42 @@ async def razorpay_webhook(
     logger.info("Razorpay webhook | event={} | sub_id={}", event, sub_id)
 
     if event == "subscription.activated" and sub_id:
-        await session.exec(text("""
+        await session.exec(
+            text("""
             UPDATE billing_subscriptions SET status = 'active'
             WHERE razorpay_sub_id = :sub_id
-        """).bindparams(sub_id=sub_id))
-        await session.exec(text("""
+        """).bindparams(sub_id=sub_id)
+        )
+        await session.exec(
+            text("""
             UPDATE organizations SET plan_status = 'active'
             WHERE razorpay_subscription_id = :sub_id
-        """).bindparams(sub_id=sub_id))
+        """).bindparams(sub_id=sub_id)
+        )
 
     elif event == "subscription.cancelled" and sub_id:
-        await session.exec(text("""
+        await session.exec(
+            text("""
             UPDATE billing_subscriptions
             SET status = 'cancelled', cancelled_at = CURRENT_TIMESTAMP
             WHERE razorpay_sub_id = :sub_id
-        """).bindparams(sub_id=sub_id))
-        await session.exec(text("""
+        """).bindparams(sub_id=sub_id)
+        )
+        await session.exec(
+            text("""
             UPDATE organizations SET plan_status = 'cancelled', plan = 'starter'
             WHERE razorpay_subscription_id = :sub_id
-        """).bindparams(sub_id=sub_id))
+        """).bindparams(sub_id=sub_id)
+        )
 
     elif event == "payment.failed" and sub_id:
         logger.warning("Payment failed for subscription: {}", sub_id)
-        await session.exec(text("""
+        await session.exec(
+            text("""
             UPDATE billing_subscriptions SET status = 'past_due'
             WHERE razorpay_sub_id = :sub_id
-        """).bindparams(sub_id=sub_id))
+        """).bindparams(sub_id=sub_id)
+        )
 
     return {"status": "ok", "event": event}
 
@@ -380,9 +407,11 @@ async def cancel_subscription(
     rz_client = _get_razorpay_client()
     if rz_client:
         # Get sub id
-        result = await session.exec(text(
-            "SELECT razorpay_sub_id FROM billing_subscriptions WHERE org_id = :org_id"
-        ).bindparams(org_id=org_id))
+        result = await session.exec(
+            text(
+                "SELECT razorpay_sub_id FROM billing_subscriptions WHERE org_id = :org_id"
+            ).bindparams(org_id=org_id)
+        )
         row = result.fetchone()
         if row and row.razorpay_sub_id:
             try:
@@ -391,15 +420,19 @@ async def cancel_subscription(
             except Exception as exc:
                 logger.warning("Razorpay cancel failed: {}", str(exc)[:100])
 
-    await session.exec(text("""
+    await session.exec(
+        text("""
         UPDATE billing_subscriptions
         SET status = 'cancelled', cancelled_at = CURRENT_TIMESTAMP
         WHERE org_id = :org_id
-    """).bindparams(org_id=org_id))
+    """).bindparams(org_id=org_id)
+    )
 
-    await session.exec(text("""
+    await session.exec(
+        text("""
         UPDATE organizations SET plan_status = 'cancelled', plan = 'starter'
         WHERE org_id = :org_id
-    """).bindparams(org_id=org_id))
+    """).bindparams(org_id=org_id)
+    )
 
     return {"org_id": org_id, "status": "cancelled", "message": "Subscription cancelled"}

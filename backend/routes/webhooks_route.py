@@ -15,18 +15,18 @@ Endpoints:
 from __future__ import annotations
 
 import json
-import re
-from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query
+from loguru import logger
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import text
 from sqlmodel.ext.asyncio.session import AsyncSession
-from loguru import logger
 
 from ..database import get_session
 from ..webhooks.dispatcher import (
-    WebhookConfig, WebhookEvent, WebhookType,
+    WebhookConfig,
+    WebhookEvent,
+    WebhookType,
     get_webhook_dispatcher,
 )
 
@@ -38,12 +38,13 @@ _VALID_TYPES = [t.value for t in WebhookType]
 
 # ── Request / Response models ──────────────────────────────────
 
+
 class WebhookCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     url: str = Field(min_length=8, max_length=500)
     webhook_type: str = Field(default="custom")
-    events: List[str] = Field(default=["violation.critical", "fire.emergency"])
-    secret: Optional[str] = Field(default=None, max_length=200)
+    events: list[str] = Field(default=["violation.critical", "fire.emergency"])
+    secret: str | None = Field(default=None, max_length=200)
     active: bool = True
 
     @field_validator("url")
@@ -62,7 +63,7 @@ class WebhookCreateRequest(BaseModel):
 
     @field_validator("events")
     @classmethod
-    def validate_events(cls, v: List[str]) -> List[str]:
+    def validate_events(cls, v: list[str]) -> list[str]:
         invalid = [e for e in v if e not in _VALID_EVENTS]
         if invalid:
             raise ValueError(f"Invalid events: {invalid}. Valid: {_VALID_EVENTS}")
@@ -74,12 +75,13 @@ class WebhookOut(BaseModel):
     name: str
     url: str
     webhook_type: str
-    events: List[str]
+    events: list[str]
     active: bool
     created_at: str
 
 
 # ── Endpoints ─────────────────────────────────────────────────
+
 
 @router.post("", status_code=201, response_model=WebhookOut)
 async def create_webhook(
@@ -118,7 +120,7 @@ async def create_webhook(
     }
 
 
-@router.get("", response_model=List[WebhookOut])
+@router.get("", response_model=list[WebhookOut])
 async def list_webhooks(
     active_only: bool = Query(default=False),
     session: AsyncSession = Depends(get_session),
@@ -126,12 +128,16 @@ async def list_webhooks(
     """List all registered webhooks."""
     where = "WHERE active = 1" if active_only else ""
     result = await session.execute(
-        text(f"SELECT id, name, url, webhook_type, events, active, created_at FROM webhooks {where} ORDER BY id"),
+        text(
+            f"SELECT id, name, url, webhook_type, events, active, created_at FROM webhooks {where} ORDER BY id"
+        ),
     )
     return [
         {
             **dict(row),
-            "events": json.loads(row["events"]) if isinstance(row["events"], str) else row["events"],
+            "events": json.loads(row["events"])
+            if isinstance(row["events"], str)
+            else row["events"],
             "created_at": str(row["created_at"]),
         }
         for row in result.mappings().all()
@@ -154,9 +160,13 @@ async def update_webhook(
             RETURNING id, created_at
         """),
         {
-            "name": body.name, "url": body.url, "type": body.webhook_type,
-            "events": json.dumps(body.events), "secret": body.secret,
-            "active": body.active, "id": webhook_id,
+            "name": body.name,
+            "url": body.url,
+            "type": body.webhook_type,
+            "events": json.dumps(body.events),
+            "secret": body.secret,
+            "active": body.active,
+            "id": webhook_id,
         },
     )
     row = result.mappings().first()
@@ -165,9 +175,12 @@ async def update_webhook(
     await session.commit()
     return {
         "id": row["id"],
-        "name": body.name, "url": body.url,
-        "webhook_type": body.webhook_type, "events": body.events,
-        "active": body.active, "created_at": str(row["created_at"]),
+        "name": body.name,
+        "url": body.url,
+        "webhook_type": body.webhook_type,
+        "events": body.events,
+        "active": body.active,
+        "created_at": str(row["created_at"]),
     }
 
 
@@ -194,7 +207,9 @@ async def test_webhook(
 ) -> dict:
     """Send a test payload to verify the webhook endpoint."""
     result = await session.execute(
-        text("SELECT id, name, url, webhook_type, events, secret, active FROM webhooks WHERE id=:id"),
+        text(
+            "SELECT id, name, url, webhook_type, events, secret, active FROM webhooks WHERE id=:id"
+        ),
         {"id": webhook_id},
     )
     row = result.mappings().first()

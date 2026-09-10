@@ -23,17 +23,17 @@ for all safety-related decisions.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from loguru import logger
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlmodel.ext.asyncio.session import AsyncSession
-from loguru import logger
 
-from ..database import get_session
 from ..auth.rbac import Role, require_role
+from ..database import get_session
 
 router = APIRouter(prefix="/audit", tags=["audit"])
 
@@ -67,40 +67,50 @@ _VALID_ACTIONS = [
 
 # ── Models ────────────────────────────────────────────────────
 
+
 class AuditEntryCreate(BaseModel):
     action: str = Field(description="Action type e.g. violation.acknowledged")
-    actor: str = Field(default="system", max_length=100,
-                       description="Who performed the action (user/api_key name or 'system')")
-    resource_type: Optional[str] = Field(default=None, max_length=50,
-                                          description="What kind of resource (violation, worker, webhook…)")
-    resource_id: Optional[str] = Field(default=None, max_length=100,
-                                        description="ID of the resource affected")
-    details: Optional[Dict[str, Any]] = Field(default=None,
-                                               description="Extra context (old/new values, notes…)")
-    ip_address: Optional[str] = Field(default=None, max_length=45)
+    actor: str = Field(
+        default="system",
+        max_length=100,
+        description="Who performed the action (user/api_key name or 'system')",
+    )
+    resource_type: str | None = Field(
+        default=None,
+        max_length=50,
+        description="What kind of resource (violation, worker, webhook…)",
+    )
+    resource_id: str | None = Field(
+        default=None, max_length=100, description="ID of the resource affected"
+    )
+    details: dict[str, Any] | None = Field(
+        default=None, description="Extra context (old/new values, notes…)"
+    )
+    ip_address: str | None = Field(default=None, max_length=45)
 
 
 class AuditEntryOut(BaseModel):
     id: int
     action: str
     actor: str
-    resource_type: Optional[str]
-    resource_id: Optional[str]
-    details: Optional[Any]  # dict from system writes, plain string from seed
-    ip_address: Optional[str]
+    resource_type: str | None
+    resource_id: str | None
+    details: Any | None  # dict from system writes, plain string from seed
+    ip_address: str | None
     created_at: str
 
 
 # ── Internal helper (used by other routes) ───────────────────
 
+
 async def write_audit(
     session: AsyncSession,
     action: str,
     actor: str = "system",
-    resource_type: Optional[str] = None,
-    resource_id: Optional[str] = None,
-    details: Optional[Dict[str, Any]] = None,
-    ip_address: Optional[str] = None,
+    resource_type: str | None = None,
+    resource_id: str | None = None,
+    details: dict[str, Any] | None = None,
+    ip_address: str | None = None,
 ) -> None:
     """Write one audit entry. Call from other route handlers."""
     try:
@@ -119,7 +129,7 @@ async def write_audit(
                 "resource_id": str(resource_id) if resource_id else None,
                 "details": json.dumps(details, default=str) if details else None,
                 "ip_address": ip_address,
-                "created_at": datetime.now(timezone.utc).isoformat(),
+                "created_at": datetime.now(UTC).isoformat(),
             },
         )
     except Exception as exc:
@@ -129,14 +139,15 @@ async def write_audit(
 
 # ── Endpoints ─────────────────────────────────────────────────
 
-@router.get("", response_model=List[AuditEntryOut])
+
+@router.get("", response_model=list[AuditEntryOut])
 async def list_audit_log(
-    action: Optional[str] = Query(default=None, description="Filter by action type"),
-    actor: Optional[str] = Query(default=None, description="Filter by actor"),
-    resource_type: Optional[str] = Query(default=None),
-    resource_id: Optional[str] = Query(default=None),
-    start_date: Optional[str] = Query(default=None, description="YYYY-MM-DD"),
-    end_date: Optional[str] = Query(default=None, description="YYYY-MM-DD"),
+    action: str | None = Query(default=None, description="Filter by action type"),
+    actor: str | None = Query(default=None, description="Filter by actor"),
+    resource_type: str | None = Query(default=None),
+    resource_id: str | None = Query(default=None),
+    start_date: str | None = Query(default=None, description="YYYY-MM-DD"),
+    end_date: str | None = Query(default=None, description="YYYY-MM-DD"),
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(get_session),

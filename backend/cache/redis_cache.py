@@ -24,11 +24,12 @@ All keys namespaced under "ism:" (Industrial Safety Monitor).
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
-from datetime import datetime, timezone
-from typing import Any, Dict, Optional, Protocol, runtime_checkable
+from datetime import UTC, datetime
+from typing import Any, Protocol, runtime_checkable
 
 from loguru import logger
 
@@ -36,25 +37,35 @@ from loguru import logger
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 # FIXED: Warn instead of raise — a missing/invalid REDIS_URL should not crash the app
 # at import time; the cache simply operates in disabled mode.
-if not re.match(r'^(rediss?|unix)://', REDIS_URL):
+if not re.match(r"^(rediss?|unix)://", REDIS_URL):
     logger.warning("Invalid REDIS_URL format: {} — Redis cache will be disabled", REDIS_URL)
     REDIS_URL = ""  # connect() will return False immediately
 
+
 # TTL values with validation
 # FIXED: raise ValueError → logger.warning + clamp (crash at import is unacceptable)
-def _validate_ttl(name: str, value: str, default: int, min_val: int = 1, max_val: int = 86400) -> int:
+def _validate_ttl(
+    name: str, value: str, default: int, min_val: int = 1, max_val: int = 86400
+) -> int:
     try:
         ttl = int(value)
     except (ValueError, TypeError):
         ttl = default
     if not min_val <= ttl <= max_val:
-        logger.warning("{} out of {}-{}: {} — using default {}", name, min_val, max_val, ttl, default)
+        logger.warning(
+            "{} out of {}-{}: {} — using default {}", name, min_val, max_val, ttl, default
+        )
         ttl = default
     return ttl
 
+
 ZONE_TTL = _validate_ttl("REDIS_ZONE_CACHE_TTL", os.getenv("REDIS_ZONE_CACHE_TTL", "300"), 300)
-EMBEDDING_TTL = _validate_ttl("REDIS_EMBEDDING_CACHE_TTL", os.getenv("REDIS_EMBEDDING_CACHE_TTL", "3600"), 3600)
-CANARY_TTL = _validate_ttl("REDIS_CANARY_TTL", os.getenv("REDIS_CANARY_TTL", "86400"), 86400, min_val=60)
+EMBEDDING_TTL = _validate_ttl(
+    "REDIS_EMBEDDING_CACHE_TTL", os.getenv("REDIS_EMBEDDING_CACHE_TTL", "3600"), 3600
+)
+CANARY_TTL = _validate_ttl(
+    "REDIS_CANARY_TTL", os.getenv("REDIS_CANARY_TTL", "86400"), 86400, min_val=60
+)
 DEDUP_TTL = _validate_ttl("REDIS_DEDUP_TTL", os.getenv("REDIS_DEDUP_TTL", "30"), 30, max_val=300)
 
 # Namespace — configurable per environment
@@ -71,6 +82,7 @@ REDIS_MAX_RETRIES = int(os.getenv("REDIS_MAX_RETRIES", "3"))
 # Serialization: msgpack for security + performance
 try:
     import msgpack
+
     _HAS_MSGPACK = True
 except ImportError:
     logger.warning("msgpack not installed — falling back to JSON for embeddings (less efficient)")
@@ -81,29 +93,37 @@ except ImportError:
 @runtime_checkable
 class RedisClientProtocol(Protocol):
     """Protocol for Redis client — enables mocking in tests."""
+
     async def ping(self) -> bool: ...
     async def setex(self, name: str, time: int, value: bytes) -> bool: ...
-    async def get(self, name: str) -> Optional[bytes]: ...
+    async def get(self, name: str) -> bytes | None: ...
     async def delete(self, *names: str) -> int: ...
     async def keys(self, pattern: str) -> list: ...
     async def scan_iter(self, match: str, count: int = 100): ...
-    async def info(self, section: str = "default") -> Dict[str, Any]: ...
+    async def info(self, section: str = "default") -> dict[str, Any]: ...
     async def dbsize(self) -> int: ...
     async def aclose(self) -> None: ...
-    async def set(self, name: str, value: bytes, ex: Optional[int] = None, nx: bool = False) -> Optional[bool]: ...
+    async def set(
+        self, name: str, value: bytes, ex: int | None = None, nx: bool = False
+    ) -> bool | None: ...
 
 
 # ── Custom exceptions for cache-specific errors ───────────────
 class CacheError(Exception):
     """Base exception for cache operations."""
+
     pass
+
 
 class CacheConnectionError(CacheError):
     """Raised when Redis connection fails."""
+
     pass
+
 
 class CacheSerializationError(CacheError):
     """Raised when (de)serialization fails."""
+
     pass
 
 
@@ -111,13 +131,13 @@ class CacheSerializationError(CacheError):
 def _sanitize_key_part(value: str, max_len: int = 100) -> str:
     """
     Sanitize a string for use in Redis key.
-    
+
     # FIXED: Prevent key injection via special chars
     """
     if not value:
         raise ValueError("Key part cannot be empty")
     # Allow only safe chars: alphanumeric, dash, underscore, colon, slash
-    cleaned = re.sub(r'[^a-zA-Z0-9_\-:/.]', '_', str(value)[:max_len])
+    cleaned = re.sub(r"[^a-zA-Z0-9_\-:/.]", "_", str(value)[:max_len])
     if not cleaned:
         raise ValueError(f"Invalid key part after sanitization: {value}")
     return cleaned
@@ -126,14 +146,14 @@ def _sanitize_key_part(value: str, max_len: int = 100) -> str:
 def _serialize(value: Any, use_msgpack: bool = True) -> bytes:
     """
     Serialize value to bytes.
-    
+
     # FIXED: Use msgpack for security (no arbitrary code exec like pickle)
     """
     try:
         if use_msgpack and _HAS_MSGPACK:
             return msgpack.packb(value, use_bin_type=True)
         # Fallback to JSON
-        return json.dumps(value).encode('utf-8')
+        return json.dumps(value).encode("utf-8")
     except Exception as e:
         raise CacheSerializationError(f"Serialization failed: {e}")
 
@@ -144,7 +164,7 @@ def _deserialize(data: bytes, use_msgpack: bool = True) -> Any:
         if use_msgpack and _HAS_MSGPACK:
             return msgpack.unpackb(data, raw=False)
         # Fallback to JSON
-        return json.loads(data.decode('utf-8'))
+        return json.loads(data.decode("utf-8"))
     except Exception as e:
         raise CacheSerializationError(f"Deserialization failed: {e}")
 
@@ -158,7 +178,7 @@ class RedisCache:
     # FIXED: Secure serialization (msgpack/JSON, no pickle)
     # FIXED: Connection pool configuration
     # IMPROVED: Structured metrics + health endpoint
-    
+
     On connection failure, all operations return None/False —
     the caller falls back to PostgreSQL. This ensures Redis is
     an optimisation, not a dependency for correctness.
@@ -176,15 +196,15 @@ class RedisCache:
         namespace: str = CACHE_NAMESPACE,
         pool_size: int = REDIS_POOL_SIZE,
         socket_timeout: float = REDIS_SOCKET_TIMEOUT,
-        client_cls: Optional[type] = None,  # For testing: inject mock client
+        client_cls: type | None = None,  # For testing: inject mock client
     ) -> None:
         self._redis_url = redis_url
         self._namespace = namespace
         self._pool_size = pool_size
         self._socket_timeout = socket_timeout
         self._client_cls = client_cls  # Injected for testing
-        
-        self._client: Optional[RedisClientProtocol] = None
+
+        self._client: RedisClientProtocol | None = None
         self._enabled = False
         self._metrics = {
             "hits": 0,
@@ -193,27 +213,29 @@ class RedisCache:
             "fallbacks": 0,
             "connect_attempts": 0,
         }
-        
+
         logger.debug(
             "RedisCache initialised | url={} | namespace={} | pool_size={}",
-            self._redact_url(redis_url), namespace, pool_size,
+            self._redact_url(redis_url),
+            namespace,
+            pool_size,
         )
 
     def _redact_url(self, url: str) -> str:
         """Redact credentials from Redis URL for logging."""
         # Remove password if present
-        return re.sub(r'://([^:]+):[^@]+@', r'://\1:***@', url)
+        return re.sub(r"://([^:]+):[^@]+@", r"://\1:***@", url)
 
     async def connect(self) -> bool:
         """
         Connect to Redis with retry logic.
         Returns True if connected, False if unavailable.
-        
+
         # FIXED: Connection pool configuration
         # IMPROVED: Retry on transient failures
         """
         self._metrics["connect_attempts"] += 1
-        
+
         for attempt in range(REDIS_MAX_RETRIES):
             try:
                 # Lazy import + allow injection for testing
@@ -222,7 +244,7 @@ class RedisCache:
                     self._client = self._client_cls()
                 else:
                     import redis.asyncio as aioredis
-                    
+
                     # Configure connection pool
                     self._client = aioredis.from_url(
                         self._redis_url,
@@ -234,22 +256,27 @@ class RedisCache:
                         retry_on_timeout=REDIS_RETRY_ON_TIMEOUT,
                         health_check_interval=30,  # Auto-reconnect on stale connections
                     )
-                
+
                 await self._client.ping()
                 self._enabled = True
                 logger.info("Redis connected: {}", self._redact_url(self._redis_url))
                 return True
-                
+
             except Exception as exc:
                 logger.warning(
                     "Redis connect attempt {}/{} failed: {} — {}",
-                    attempt + 1, REDIS_MAX_RETRIES, type(exc).__name__, exc,
+                    attempt + 1,
+                    REDIS_MAX_RETRIES,
+                    type(exc).__name__,
+                    exc,
                 )
                 if attempt < REDIS_MAX_RETRIES - 1:
                     await asyncio.sleep(0.5 * (attempt + 1))  # Exponential backoff
                 continue
-        
-        logger.error("Redis unavailable after {} attempts — running without cache", REDIS_MAX_RETRIES)
+
+        logger.error(
+            "Redis unavailable after {} attempts — running without cache", REDIS_MAX_RETRIES
+        )
         self._client = None
         self._enabled = False
         self._metrics["errors"] += 1
@@ -281,7 +308,7 @@ class RedisCache:
             self._metrics["errors"] += 1
             return False
 
-    async def _get(self, key: str) -> Optional[bytes]:
+    async def _get(self, key: str) -> bytes | None:
         if not self._enabled or not self._client:
             return None
         try:
@@ -313,7 +340,7 @@ class RedisCache:
     async def _scan_keys(self, pattern: str) -> list:
         """
         Scan for keys matching pattern — non-blocking alternative to KEYS.
-        
+
         # FIXED: Use SCAN instead of KEYS to avoid blocking Redis
         """
         if not self._enabled or not self._client:
@@ -333,27 +360,27 @@ class RedisCache:
 
     async def set_zones(
         self,
-        zones: Dict[str, Any],
+        zones: dict[str, Any],
         camera_id: str = "default",
     ) -> bool:
         """
         Cache zone definitions for one camera.
-        
+
         # FIXED: Validate inputs before caching
         """
         # Validate camera_id
         camera_id_safe = _sanitize_key_part(camera_id, max_len=50)
-        
+
         # Validate zones structure (basic schema check)
         if not isinstance(zones, dict):
             logger.error("set_zones: expected dict, got {}", type(zones).__name__)
             return False
-        
+
         # Optional: deeper validation if needed
         # for zone_id, zone_data in zones.items():
         #     if not isinstance(zone_data, dict) or "polygon_norm" not in zone_data:
         #         logger.warning("Invalid zone data for {}: missing polygon_norm", zone_id)
-        
+
         key = f"zones:{camera_id_safe}"
         try:
             value = _serialize(zones, use_msgpack=True)
@@ -365,7 +392,7 @@ class RedisCache:
     async def get_zones(
         self,
         camera_id: str = "default",
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """Get cached zone definitions. None if miss or error."""
         camera_id_safe = _sanitize_key_part(camera_id, max_len=50)
         raw = await self._get(f"zones:{camera_id_safe}")
@@ -408,24 +435,26 @@ class RedisCache:
     ) -> bool:
         """
         Cache face embedding for one worker.
-        
+
         # FIXED: Validate worker_id format
         # FIXED: Accept raw bytes (not pickle) for security
         """
         worker_id_safe = _sanitize_key_part(worker_id, max_len=100)
-        
+
         # Validate embedding is bytes
         if not isinstance(embedding, bytes):
             logger.error("set_embedding: expected bytes, got {}", type(embedding).__name__)
             return False
-        
+
         # Optional: validate embedding size (e.g., 512-float32 = 2048 bytes)
         if len(embedding) > 10000:  # Sanity check
-            logger.warning("Large embedding for worker {}: {} bytes", worker_id_safe, len(embedding))
-        
+            logger.warning(
+                "Large embedding for worker {}: {} bytes", worker_id_safe, len(embedding)
+            )
+
         return await self._set(f"embedding:{worker_id_safe}", embedding, EMBEDDING_TTL)
 
-    async def get_embedding(self, worker_id: str) -> Optional[bytes]:
+    async def get_embedding(self, worker_id: str) -> bytes | None:
         """Get cached face embedding bytes."""
         worker_id_safe = _sanitize_key_part(worker_id, max_len=100)
         return await self._get(f"embedding:{worker_id_safe}")
@@ -436,21 +465,21 @@ class RedisCache:
 
     # ── Canary routing flag ───────────────────────────────────
 
-    async def set_canary_state(self, state: Dict[str, Any]) -> bool:
+    async def set_canary_state(self, state: dict[str, Any]) -> bool:
         """
         Share canary router state across processes.
-        
+
         # FIXED: Validate state schema (basic)
         """
         if not isinstance(state, dict):
             logger.error("set_canary_state: expected dict, got {}", type(state).__name__)
             return False
-        
+
         # Optional: enforce required fields
         # required = ["model_version", "traffic_pct", "enabled"]
         # if not all(k in state for k in required):
         #     logger.warning("Canary state missing required fields: {}", required)
-        
+
         try:
             value = _serialize(state, use_msgpack=True)
             return await self._set("canary:state", value, CANARY_TTL)
@@ -458,7 +487,7 @@ class RedisCache:
             logger.error("Canary state serialization failed: {}", e)
             return False
 
-    async def get_canary_state(self) -> Optional[Dict[str, Any]]:
+    async def get_canary_state(self) -> dict[str, Any] | None:
         raw = await self._get("canary:state")
         if raw is None:
             return None
@@ -479,31 +508,29 @@ class RedisCache:
         """
         Mark a (track_id, class_name) pair as recently seen.
         Returns True if this is a NEW violation (not a duplicate).
-        
+
         # FIXED: Sanitize class_name to prevent key injection
         # FIXED: Validate TTL per-call
         """
         if not isinstance(track_id, int) or track_id < 0:
             logger.error("mark_violation_seen: invalid track_id {}", track_id)
             return True  # Treat as new on invalid input
-        
+
         class_name_safe = _sanitize_key_part(class_name, max_len=50)
-        
+
         # Validate TTL for this call
         if not 1 <= ttl <= 300:
             logger.warning("Invalid dedup TTL {}: using default {}", ttl, DEDUP_TTL)
             ttl = DEDUP_TTL
-        
+
         key = f"viol:{track_id}:{class_name_safe}"
-        
+
         if not self._enabled or not self._client:
             return True  # Without Redis, treat every violation as new
-        
+
         try:
             # NX = only set if key doesn't exist → returns True if newly set
-            result = await self._client.set(
-                f"{self._namespace}{key}", b"1", ex=ttl, nx=True
-            )
+            result = await self._client.set(f"{self._namespace}{key}", b"1", ex=ttl, nx=True)
             return result is True  # True only if key was newly created
         except Exception:
             # On error, fall back to "new violation" to avoid false dedup
@@ -513,25 +540,28 @@ class RedisCache:
 
     # ── Stats & Health ────────────────────────────────────────
 
-    async def get_stats(self) -> Dict[str, Any]:
+    async def get_stats(self) -> dict[str, Any]:
         """Return cache metrics + Redis info."""
         base_stats = {
             "enabled": self._enabled,
             "namespace": self._namespace,
             "metrics": {**self._metrics},
             "hit_rate": round(
-                self._metrics["hits"] / max(self._metrics["hits"] + self._metrics["misses"], 1) * 100, 1
+                self._metrics["hits"]
+                / max(self._metrics["hits"] + self._metrics["misses"], 1)
+                * 100,
+                1,
             ),
         }
-        
+
         if not self._enabled or not self._client:
             return {**base_stats, "status": "disconnected"}
-        
+
         try:
             # Use non-blocking info commands
             info = await self._client.info("memory")
             keys_count = await self._client.dbsize()
-            
+
             return {
                 **base_stats,
                 "status": "connected",
@@ -549,24 +579,24 @@ class RedisCache:
                 "error": f"{type(exc).__name__}: {exc}",
             }
 
-    async def health_check(self) -> Dict[str, Any]:
+    async def health_check(self) -> dict[str, Any]:
         """
         Lightweight health check for load balancers / Kubernetes.
-        
+
         Returns:
             {"status": "healthy"|"degraded"|"unhealthy", "latency_ms": float}
         """
-        start = datetime.now(timezone.utc)
-        
+        start = datetime.now(UTC)
+
         if not self._enabled or not self._client:
             return {"status": "unhealthy", "reason": "not_connected", "latency_ms": 0}
-        
+
         try:
             await self._client.ping()
-            latency = (datetime.now(timezone.utc) - start).total_seconds() * 1000
+            latency = (datetime.now(UTC) - start).total_seconds() * 1000
             return {"status": "healthy", "latency_ms": round(latency, 2)}
         except Exception as exc:
-            latency = (datetime.now(timezone.utc) - start).total_seconds() * 1000
+            latency = (datetime.now(UTC) - start).total_seconds() * 1000
             return {
                 "status": "degraded" if latency < 100 else "unhealthy",
                 "reason": f"ping_failed: {type(exc).__name__}",
@@ -577,13 +607,16 @@ class RedisCache:
     def is_enabled(self) -> bool:
         return self._enabled
 
-    def get_metrics(self) -> Dict[str, Any]:
+    def get_metrics(self) -> dict[str, Any]:
         """Return in-memory metrics (for Prometheus exporter)."""
         return {
             **self._metrics,
             "enabled": self._enabled,
             "hit_rate": round(
-                self._metrics["hits"] / max(self._metrics["hits"] + self._metrics["misses"], 1) * 100, 1
+                self._metrics["hits"]
+                / max(self._metrics["hits"] + self._metrics["misses"], 1)
+                * 100,
+                1,
             ),
         }
 
@@ -593,17 +626,17 @@ class RedisCache:
 
 
 # ── Singleton with lazy initialization + dependency injection ─
-_redis_cache_instance: Optional[RedisCache] = None
+_redis_cache_instance: RedisCache | None = None
 
 
 def get_redis_cache(
-    redis_url: Optional[str] = None,
-    namespace: Optional[str] = None,
-    client_cls: Optional[type] = None,  # For testing
+    redis_url: str | None = None,
+    namespace: str | None = None,
+    client_cls: type | None = None,  # For testing
 ) -> RedisCache:
     """
     Get or create the Redis cache singleton.
-    
+
     # IMPROVED: Lazy initialization + dependency injection support
     """
     global _redis_cache_instance
@@ -624,19 +657,19 @@ redis_cache = get_redis_cache()
 class RedisCacheContext:
     """
     Async context manager for Redis cache lifecycle.
-    
+
     Usage:
         async with RedisCacheContext() as cache:
             await cache.set_zones(zones)
     """
-    
+
     def __init__(self, **kwargs):
         self._cache = RedisCache(**kwargs)
-    
+
     async def __aenter__(self) -> RedisCache:
         await self._cache.connect()
         return self._cache
-    
+
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self._cache.disconnect()
         return False  # Don't suppress exceptions

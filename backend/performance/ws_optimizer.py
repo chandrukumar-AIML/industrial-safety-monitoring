@@ -27,12 +27,12 @@ from __future__ import annotations
 import asyncio
 import os
 import time
-from collections import defaultdict
-from typing import Dict, List, Optional, Set, Any, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 from fastapi import WebSocket, WebSocketDisconnect
 from loguru import logger
 from pydantic import BaseModel, Field, field_validator  # FIXED: Pydantic v2 compatibility
+
 
 # ── Config: Load from env with validation ─────────────────────
 def _validate_int_range(name: str, value: str, default: int, min_val: int, max_val: int) -> int:
@@ -45,7 +45,10 @@ def _validate_int_range(name: str, value: str, default: int, min_val: int, max_v
         logger.warning("{} invalid: {} — using default {}", name, value, default)
         return default
 
-def _validate_float_range(name: str, value: str, default: float, min_val: float, max_val: float) -> float:
+
+def _validate_float_range(
+    name: str, value: str, default: float, min_val: float, max_val: float
+) -> float:
     try:
         val = float(value)
         if not min_val <= val <= max_val:
@@ -55,59 +58,71 @@ def _validate_float_range(name: str, value: str, default: float, min_val: float,
         logger.warning("{} invalid: {} — using default {}", name, value, default)
         return default
 
-WS_CONCURRENCY = _validate_int_range("WS_CONCURRENCY", os.getenv("WS_CONCURRENCY", "50"), 50, 10, 200)
+
+WS_CONCURRENCY = _validate_int_range(
+    "WS_CONCURRENCY", os.getenv("WS_CONCURRENCY", "50"), 50, 10, 200
+)
 CLIENT_FPS_CAP = _validate_int_range("CLIENT_FPS_CAP", os.getenv("CLIENT_FPS_CAP", "25"), 25, 1, 60)
 CLIENT_FRAME_GAP = 1.0 / CLIENT_FPS_CAP
 
 # Message types that bypass FPS cap
 PRIORITY_TYPES = {
-    "zone_alert", "fire_status", "pose_hazard",
-    "proximity_alert", "camera_offline", "fire_emergency",
+    "zone_alert",
+    "fire_status",
+    "pose_hazard",
+    "proximity_alert",
+    "camera_offline",
+    "fire_emergency",
 }
+
 
 # ── Protocol for dependency injection ─────────────────────────
 @runtime_checkable
 class WebSocketProtocol(Protocol):
     """Protocol for WebSocket — enables mocking in tests."""
+
     async def send_text(self, message: str) -> None: ...
     async def accept(self) -> None: ...
+
 
 # ── Pydantic models for structured validation ─────────────────
 class WSConfig(BaseModel):
     """Validated configuration for WebSocket manager."""
+
     concurrency: int = Field(default=WS_CONCURRENCY, ge=10, le=200)
     client_fps_cap: int = Field(default=CLIENT_FPS_CAP, ge=1, le=60)
-    priority_types: Set[str] = Field(default=PRIORITY_TYPES)
-    
+    priority_types: set[str] = Field(default=PRIORITY_TYPES)
+
     @property
     def frame_gap(self) -> float:
         return 1.0 / self.client_fps_cap
-    
+
     @field_validator("priority_types")
     @classmethod
     def validate_priority_types(cls, v):
         # Ensure all priority types are valid strings
         return {t for t in v if isinstance(t, str) and t.strip()}
 
+
 class OptimisedConnectionManager:
     """
     WebSocket connection manager with concurrent broadcast.
-    
+
     # FIXED: Proper error handling for concurrent sends
     # IMPROVED: Memory-efficient connection tracking with weak refs
     # IMPROVED: Dependency injection for testability
     # FIXED: No PII leakage in logs
-    
+
     Replaces the original sequential ConnectionManager.
     Drop-in replacement — same interface.
     """
 
-    def __init__(self, config: Optional[WSConfig] = None) -> None:
+    def __init__(self, config: WSConfig | None = None) -> None:
         self._config = config or WSConfig()
         # websocket → last_send_time (for FPS cap)
-        self._connections: Dict[WebSocket, float] = {}
+        self._connections: dict[WebSocket, float] = {}
         # websocket → set of subscribed message types (None = all)
-        self._subscriptions: Dict[WebSocket, Optional[Set[str]]] = {}
+        self._subscriptions: dict[WebSocket, set[str] | None] = {}
         self._lock = asyncio.Lock()
         self._total_sent = 0
         self._total_dropped = 0
@@ -115,13 +130,15 @@ class OptimisedConnectionManager:
 
         logger.info(
             "WS Optimizer ready | concurrency={} | fps_cap={} | priority_types={}",
-            self._config.concurrency, self._config.client_fps_cap, self._config.priority_types,
+            self._config.concurrency,
+            self._config.client_fps_cap,
+            self._config.priority_types,
         )
 
     async def connect(
         self,
         websocket: WebSocket,
-        subscriptions: Optional[Set[str]] = None,
+        subscriptions: set[str] | None = None,
     ) -> None:
         """Accept a new WebSocket connection."""
         await websocket.accept()
@@ -220,12 +237,9 @@ class OptimisedConnectionManager:
         batch_size = self._config.concurrency
 
         for i in range(0, len(clients), batch_size):
-            batch = clients[i:i + batch_size]
+            batch = clients[i : i + batch_size]
             results = await asyncio.gather(
-                *(
-                    self._send_to_one(ws, message, message_type, now)
-                    for ws in batch
-                ),
+                *(self._send_to_one(ws, message, message_type, now) for ws in batch),
                 return_exceptions=True,
             )
             sent += sum(1 for r in results if r is True)
@@ -269,7 +283,7 @@ class OptimisedConnectionManager:
         """
         removed = 0
         dead_clients = []
-        
+
         for ws in list(self._connections.keys()):
             try:
                 # Ping to check if connection is alive
@@ -278,19 +292,19 @@ class OptimisedConnectionManager:
                 pass
             except Exception:
                 dead_clients.append(ws)
-        
+
         for ws in dead_clients:
             await self.disconnect(ws)
             removed += 1
-        
+
         if removed > 0:
             logger.info("Cleaned up {} dead WebSocket connections", removed)
-        
+
         return removed
 
 
 # ── Singleton with lazy initialization ───────────────────────
-_ws_manager_instance: Optional[OptimisedConnectionManager] = None
+_ws_manager_instance: OptimisedConnectionManager | None = None
 
 
 def get_ws_manager(**kwargs) -> OptimisedConnectionManager:

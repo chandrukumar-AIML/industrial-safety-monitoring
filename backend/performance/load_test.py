@@ -27,9 +27,10 @@ Targets:
 import json
 import os
 import random
-import time
-from locust import HttpUser, task, between, events
+
+from locust import between, events, task
 from locust.contrib.fasthttp import FastHttpUser
+
 
 # ── Config: Load from env with validation ─────────────────────
 def _validate_int_range(name: str, value: str, default: int, min_val: int, max_val: int) -> int:
@@ -42,9 +43,16 @@ def _validate_int_range(name: str, value: str, default: int, min_val: int, max_v
         print(f"WARNING: {name} invalid: {value} — using default {default}")
         return default
 
-TARGET_USERS = _validate_int_range("LOAD_TEST_USERS", os.getenv("LOAD_TEST_USERS", "50"), 50, 10, 500)
-SPAWN_RATE = _validate_int_range("LOAD_TEST_SPAWN_RATE", os.getenv("LOAD_TEST_SPAWN_RATE", "5"), 5, 1, 50)
-RUN_TIME_S = _validate_int_range("LOAD_TEST_RUN_TIME_S", os.getenv("LOAD_TEST_RUN_TIME_S", "60"), 60, 30, 300)
+
+TARGET_USERS = _validate_int_range(
+    "LOAD_TEST_USERS", os.getenv("LOAD_TEST_USERS", "50"), 50, 10, 500
+)
+SPAWN_RATE = _validate_int_range(
+    "LOAD_TEST_SPAWN_RATE", os.getenv("LOAD_TEST_SPAWN_RATE", "5"), 5, 1, 50
+)
+RUN_TIME_S = _validate_int_range(
+    "LOAD_TEST_RUN_TIME_S", os.getenv("LOAD_TEST_RUN_TIME_S", "60"), 60, 30, 300
+)
 
 # Performance targets (ms)
 TARGETS = {
@@ -55,16 +63,17 @@ TARGETS = {
     "POST /agent/trigger": 200,
 }
 
+
 # ── Base user with common setup ───────────────────────────────
 class BaseUser(FastHttpUser):
     """Base user with common headers and error handling."""
-    
+
     # Common headers for all requests
     headers = {
         "Content-Type": "application/json",
         "User-Agent": "LoadTest/1.0",
     }
-    
+
     def on_start(self):
         """Setup for each virtual user."""
         # Optional: authenticate if needed
@@ -73,7 +82,7 @@ class BaseUser(FastHttpUser):
         #     token = response.json().get("access_token")
         #     self.client.headers["Authorization"] = f"Bearer {token}"
         pass
-    
+
     def on_stop(self):
         """Cleanup for each virtual user."""
         pass
@@ -84,6 +93,7 @@ class APIUser(BaseUser):
     Simulates a dashboard user reading API endpoints.
     Wait 1-3 seconds between requests.
     """
+
     wait_time = between(1, 3)
     weight = 70  # 70% of virtual users are API readers
 
@@ -236,12 +246,17 @@ class ViolationWriteUser(BaseUser):
     Simulates the violation agent triggering.
     Lower weight — write operations are less frequent.
     """
+
     wait_time = between(5, 15)
     weight = 15
 
     VIOLATION_CLASSES = [
-        "no hardhat", "no gloves", "no goggles",
-        "no boots", "no mask", "no suit",
+        "no hardhat",
+        "no gloves",
+        "no goggles",
+        "no boots",
+        "no mask",
+        "no suit",
     ]
     ZONE_IDS = [f"zone-{i}" for i in range(1, 6)]
 
@@ -273,6 +288,7 @@ class ZoneManagementUser(BaseUser):
     Simulates supervisor zone CRUD.
     Very low weight — occasional zone updates.
     """
+
     wait_time = between(30, 60)
     weight = 15
 
@@ -349,10 +365,11 @@ def on_test_stop(environment, **kwargs):
     print(f"  Failed requests: {stats.total.num_failures}")
     print(f"  Avg response time: {stats.total.avg_response_time:.0f}ms")
     print("=" * 60)
-    
+
     # Exit with error code if targets failed (for CI/CD)
     if failed > 0:
         import sys
+
         sys.exit(1)
 
 
@@ -363,9 +380,9 @@ def on_test_stop(environment, **kwargs):
 # - k6 with ws module
 # - custom asyncio script
 
+
 def register_custom_metrics():
     """Register custom metrics for WebSocket testing."""
-    from locust import stats
     # Example: stats.request_stats.register_custom_metric("ws_latency", "ms")
     pass
 

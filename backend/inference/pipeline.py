@@ -21,32 +21,35 @@ from __future__ import annotations
 import asyncio
 import gc
 import os
-import re
 import time
-from collections import defaultdict
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import AsyncGenerator, Dict, List, Optional, Any, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 import cv2
 import numpy as np
 from loguru import logger
 
+from ..alerts.fire_alert_engine import fire_alert_engine
+from ..alerts.pose_alert_engine import PoseHazard, pose_alert_engine
+
 # ── Local imports (lazy-loaded where heavy) ───────────────────
-from .detector import PPEDetector, InferenceRuntimeError
+from .detector import InferenceRuntimeError, PPEDetector
+from .fire_detector import FireDetection, FireDetector
+from .heatmap import HeatmapGenerator
+from .light_enhancer import LightEnhancer
+from .machinery_detector import MachineryDetection, MachineryDetector
+from .pose_detector import PoseDetector, get_pose_detector
+from .proximity_engine import ProximityAlert, get_proximity_engine
 from .tracker import ByteTracker, TrackedDetection
-from .heatmap import HeatmapGenerator, ZoneRisk
-from .zones import load_zones, ZoneRegistrar, validate_zones_config
-from .light_enhancer import LightEnhancer, EnhancementStats
-from .pose_detector import PoseDetector, PoseLandmarks, get_pose_detector
-from .machinery_detector import MachineryDetector, MachineryDetection
-from .fire_detector import FireDetector, FireDetection
-from .proximity_engine import ProximityEngine, ProximityAlert, get_proximity_engine
-from ..alerts.pose_alert_engine import pose_alert_engine, PoseHazard
-from ..alerts.fire_alert_engine import fire_alert_engine, FireAlertEvent
+from .zones import load_zones
+
 
 # ── Config: Load from env with validation ─────────────────────
-def _validate_float_range(name: str, value: str, default: float, min_val: float, max_val: float) -> float:
+def _validate_float_range(
+    name: str, value: str, default: float, min_val: float, max_val: float
+) -> float:
     try:
         val = float(value)
         if not min_val <= val <= max_val:
@@ -56,9 +59,14 @@ def _validate_float_range(name: str, value: str, default: float, min_val: float,
         logger.warning("{} invalid: {} — using default {}", name, value, default)
         return default
 
+
 # Detection thresholds
-CONF_THRESHOLD = _validate_float_range("CONFIDENCE_THRESHOLD", os.getenv("CONFIDENCE_THRESHOLD", "0.35"), 0.35, 0.0, 1.0)
-IOU_THRESHOLD = _validate_float_range("IOU_THRESHOLD", os.getenv("IOU_THRESHOLD", "0.45"), 0.45, 0.0, 1.0)
+CONF_THRESHOLD = _validate_float_range(
+    "CONFIDENCE_THRESHOLD", os.getenv("CONFIDENCE_THRESHOLD", "0.35"), 0.35, 0.0, 1.0
+)
+IOU_THRESHOLD = _validate_float_range(
+    "IOU_THRESHOLD", os.getenv("IOU_THRESHOLD", "0.45"), 0.45, 0.0, 1.0
+)
 
 # Pipeline tuning
 FRAME_SKIP = int(os.getenv("PIPELINE_FRAME_SKIP", "1"))
@@ -88,14 +96,23 @@ DEFAULT_LABEL_FONT_SCALE = float(os.getenv("ANNOTATION_FONT_SCALE", "0.45"))
 DEFAULT_LABEL_THICKNESS = int(os.getenv("ANNOTATION_LABEL_THICKNESS", "1"))
 
 # Allowed paths for configs/models
-ALLOWED_CONFIG_DIRS = [os.path.abspath(d.strip()) for d in os.getenv("ALLOWED_CONFIG_DIRS", "./config").split(",") if d.strip()]
-ALLOWED_MODEL_DIRS = [os.path.abspath(d.strip()) for d in os.getenv("ALLOWED_MODEL_DIRS", "./models").split(",") if d.strip()]
+ALLOWED_CONFIG_DIRS = [
+    os.path.abspath(d.strip())
+    for d in os.getenv("ALLOWED_CONFIG_DIRS", "./config").split(",")
+    if d.strip()
+]
+ALLOWED_MODEL_DIRS = [
+    os.path.abspath(d.strip())
+    for d in os.getenv("ALLOWED_MODEL_DIRS", "./models").split(",")
+    if d.strip()
+]
 
 
 # ── Protocol for dependency injection ─────────────────────────
 @runtime_checkable
 class AppStateProtocol(Protocol):
     """Protocol for app state — enables mocking in tests."""
+
     latest_frame: Any
 
 
@@ -105,34 +122,35 @@ class FrameResult:
     """
     Everything produced from one processed frame.
     Placed on the async queue consumed by FastAPI.
-    
+
     # FIXED: Proper type hints + validation via __post_init__
     # IMPROVED: to_dict() method for JSON serialization
     """
+
     frame_idx: int
     timestamp: float
     frame_bgr: np.ndarray
-    detections: List[TrackedDetection]
-    violations: List[TrackedDetection]
+    detections: list[TrackedDetection]
+    violations: list[TrackedDetection]
     active_tracks: int
-    heatmap_overlay: Optional[np.ndarray] = None
+    heatmap_overlay: np.ndarray | None = None
     fps: float = 0.0
-    zone_risks: Optional[List[Dict[str, Any]]] = None
-    
+    zone_risks: list[dict[str, Any]] | None = None
+
     # Phase F: Pose hazards
-    pose_hazards: List[PoseHazard] = field(default_factory=list)
-    
+    pose_hazards: list[PoseHazard] = field(default_factory=list)
+
     # Phase G: Machinery + proximity
-    machines: List[MachineryDetection] = field(default_factory=list)
-    proximity_alerts: List[ProximityAlert] = field(default_factory=list)
-    
+    machines: list[MachineryDetection] = field(default_factory=list)
+    proximity_alerts: list[ProximityAlert] = field(default_factory=list)
+
     # Phase H: Fire detection
-    fire_detections: List[FireDetection] = field(default_factory=list)
-    fire_status: Dict[str, Any] = field(default_factory=dict)
-    
+    fire_detections: list[FireDetection] = field(default_factory=list)
+    fire_status: dict[str, Any] = field(default_factory=dict)
+
     # Diagnostics
     processing_time_ms: float = 0.0
-    enhancement_stats: Optional[Dict[str, Any]] = None
+    enhancement_stats: dict[str, Any] | None = None
 
     def __post_init__(self):
         # Validate critical fields
@@ -146,10 +164,10 @@ class FrameResult:
             if self.frame_bgr.ndim != 3 or self.frame_bgr.shape[2] != 3:
                 logger.warning("FrameResult: unexpected frame shape {}", self.frame_bgr.shape)
 
-    def to_dict(self, include_frame: bool = False) -> Dict[str, Any]:
+    def to_dict(self, include_frame: bool = False) -> dict[str, Any]:
         """
         Convert to dict for JSON serialization.
-        
+
         Args:
             include_frame: If True, include base64-encoded frame (large!).
         """
@@ -161,25 +179,30 @@ class FrameResult:
             "active_tracks": self.active_tracks,
             "fps": round(self.fps, 1),
             "zone_risks": self.zone_risks,
-            "pose_hazards": [h.to_dict() if hasattr(h, 'to_dict') else vars(h) for h in self.pose_hazards],
-            "machines": [m.to_dict() if hasattr(m, 'to_dict') else vars(m) for m in self.machines],
-            "proximity_alerts": [a.to_dict() if hasattr(a, 'to_dict') else vars(a) for a in self.proximity_alerts],
+            "pose_hazards": [
+                h.to_dict() if hasattr(h, "to_dict") else vars(h) for h in self.pose_hazards
+            ],
+            "machines": [m.to_dict() if hasattr(m, "to_dict") else vars(m) for m in self.machines],
+            "proximity_alerts": [
+                a.to_dict() if hasattr(a, "to_dict") else vars(a) for a in self.proximity_alerts
+            ],
             "fire_detections": [vars(d) for d in self.fire_detections],
             "fire_status": self.fire_status,
             "processing_time_ms": round(self.processing_time_ms, 2),
             "enhancement_stats": self.enhancement_stats,
         }
-        
+
         if include_frame and self.frame_bgr is not None:
             import base64
+
             _, buf = cv2.imencode(".jpg", self.frame_bgr, [cv2.IMWRITE_JPEG_QUALITY, 75])
             result["frame_b64"] = base64.b64encode(buf.tobytes()).decode()
-        
+
         return result
 
 
 # ── Class-level constants (not rebuilt per frame) ─────────────
-_CLASS_COLORS: Dict[str, tuple[int, int, int]] = {
+_CLASS_COLORS: dict[str, tuple[int, int, int]] = {
     "helmet": (46, 204, 113),
     "no-helmet": (231, 76, 60),
     "safety-vest": (52, 152, 219),
@@ -203,7 +226,7 @@ class InferencePipeline:
     # IMPROVED: Component integration with graceful fallbacks
     # FIXED: Memory management for long-running processes
     # FIXED: Input validation + sanitization
-    
+
     Usage (inside FastAPI lifespan):
         pipeline = InferencePipeline(config)
         await pipeline.start()
@@ -221,16 +244,16 @@ class InferencePipeline:
         iou_threshold: float = IOU_THRESHOLD,
         frame_skip: int = FRAME_SKIP,
         queue_maxsize: int = QUEUE_MAXSIZE,
-        class_names: Optional[List[str]] = None,
-        violation_classes: Optional[List[str]] = None,
-        zones_config: Optional[str] = None,
+        class_names: list[str] | None = None,
+        violation_classes: list[str] | None = None,
+        zones_config: str | None = None,
         frame_width: int = 640,
         frame_height: int = 640,
         enable_light_enhancement: bool = ENABLE_LIGHT_ENHANCEMENT,
         enable_pose: bool = ENABLE_POSE_DETECTION,
         enable_machinery: bool = ENABLE_MACHINERY_DETECTION,
         enable_fire: bool = ENABLE_FIRE_DETECTION,
-        app_state: Optional[AppStateProtocol] = None,
+        app_state: AppStateProtocol | None = None,
     ) -> None:
         # ── Input validation — fail fast ──────────────────────
         if not isinstance(model_path, str) or not model_path.strip():
@@ -262,7 +285,7 @@ class InferencePipeline:
         self.frame_height = frame_height
         self.device = device
         self._running = False
-        self._task: Optional[asyncio.Task] = None
+        self._task: asyncio.Task | None = None
         self._queue: asyncio.Queue[FrameResult] = asyncio.Queue(maxsize=queue_maxsize)
         self._app_state = app_state
 
@@ -287,13 +310,13 @@ class InferencePipeline:
         )
 
         # Optional: Light enhancement
-        self._light_enhancer: Optional[LightEnhancer] = None
+        self._light_enhancer: LightEnhancer | None = None
         if enable_light_enhancement:
             self._light_enhancer = LightEnhancer()
             logger.info("LightEnhancer enabled")
 
         # Optional: Pose detection
-        self._pose_detector: Optional[PoseDetector] = None
+        self._pose_detector: PoseDetector | None = None
         if enable_pose:
             try:
                 self._pose_detector = get_pose_detector()
@@ -303,7 +326,7 @@ class InferencePipeline:
                 enable_pose = False
 
         # Optional: Machinery detection + proximity
-        self._machinery_detector: Optional[MachineryDetector] = None
+        self._machinery_detector: MachineryDetector | None = None
         self._proximity_engine = get_proximity_engine()
         if enable_machinery:
             machinery_model = os.getenv("MACHINERY_MODEL_PATH", "models/machinery_best.pt")
@@ -321,7 +344,7 @@ class InferencePipeline:
                 enable_machinery = False
 
         # Optional: Fire detection
-        self._fire_detector: Optional[FireDetector] = None
+        self._fire_detector: FireDetector | None = None
         if enable_fire:
             fire_model = os.getenv("FIRE_MODEL_PATH", "models/fire_best.pt")
             if Path(fire_model).exists():
@@ -336,7 +359,7 @@ class InferencePipeline:
                 enable_fire = False
 
         # Zones
-        self.zones: Dict[str, np.ndarray] = {}
+        self.zones: dict[str, np.ndarray] = {}
         if zones_config:
             try:
                 self.zones = load_zones(zones_config, self.tracker, self.heatmap)
@@ -347,18 +370,27 @@ class InferencePipeline:
         logger.info(
             "InferencePipeline ready | source={} | device={} | skip={} | "
             "frame={}x{} | zones={} | components=[{}]",
-            video_source, device, frame_skip,
-            frame_width, frame_height, list(self.zones.keys()),
-            ", ".join(filter(None, [
-                "PPE",
-                "light" if enable_light_enhancement else None,
-                "pose" if enable_pose else None,
-                "machinery" if enable_machinery else None,
-                "fire" if enable_fire else None,
-            ])),
+            video_source,
+            device,
+            frame_skip,
+            frame_width,
+            frame_height,
+            list(self.zones.keys()),
+            ", ".join(
+                filter(
+                    None,
+                    [
+                        "PPE",
+                        "light" if enable_light_enhancement else None,
+                        "pose" if enable_pose else None,
+                        "machinery" if enable_machinery else None,
+                        "fire" if enable_fire else None,
+                    ],
+                )
+            ),
         )
 
-    def _validate_path(self, path: str, allowed_dirs: List[str], name: str) -> None:
+    def _validate_path(self, path: str, allowed_dirs: list[str], name: str) -> None:
         """Validate that path is within allowed directories."""
         resolved = Path(path).resolve()
         if not any(str(resolved).startswith(d) for d in allowed_dirs):
@@ -379,7 +411,7 @@ class InferencePipeline:
         # Validate coordinate ranges
         if np.any(polygon < 0) or np.any(polygon > 10000):
             raise ValueError("polygon coordinates out of reasonable range")
-        
+
         self.tracker.register_zone(zone_id, polygon)
         self.heatmap.register_zone(zone_id, polygon)
         self.zones[zone_id] = polygon
@@ -398,7 +430,7 @@ class InferencePipeline:
     def reload_zones(self, zones_config: str) -> None:
         """Hot-reload zones from a new YAML file without restarting."""
         self._validate_path(zones_config, ALLOWED_CONFIG_DIRS, "zones_config")
-        
+
         previous_zones = dict(self.zones)
         try:
             # Clear existing
@@ -440,7 +472,7 @@ class InferencePipeline:
             except asyncio.CancelledError:
                 pass
         # Cleanup resources
-        if hasattr(self, '_pose_detector') and self._pose_detector:
+        if hasattr(self, "_pose_detector") and self._pose_detector:
             self._pose_detector.close()
         logger.info("Inference pipeline stopped")
 
@@ -452,12 +484,12 @@ class InferencePipeline:
             try:
                 result = await asyncio.wait_for(self._queue.get(), timeout=1.0)
                 yield result
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
             except asyncio.CancelledError:
                 break
 
-    async def get_latest(self) -> Optional[FrameResult]:
+    async def get_latest(self) -> FrameResult | None:
         """Non-blocking — returns most recent result or None."""
         try:
             return self._queue.get_nowait()
@@ -474,13 +506,10 @@ class InferencePipeline:
         """
         loop = asyncio.get_running_loop()
         frame_idx = 0
-        cap: Optional[cv2.VideoCapture] = None
+        cap: cv2.VideoCapture | None = None
 
         try:
-            cap = await loop.run_in_executor(
-                None, 
-                lambda: cv2.VideoCapture(self.video_source)
-            )
+            cap = await loop.run_in_executor(None, lambda: cv2.VideoCapture(self.video_source))
             if not cap.isOpened():
                 raise RuntimeError(f"Cannot open video source: {self.video_source}")
 
@@ -491,7 +520,10 @@ class InferencePipeline:
                 if actual_w != self.frame_width or actual_h != self.frame_height:
                     logger.info(
                         "Frame size from source: {}x{} (init was {}x{}) — updating",
-                        actual_w, actual_h, self.frame_width, self.frame_height,
+                        actual_w,
+                        actual_h,
+                        self.frame_width,
+                        self.frame_height,
                     )
                     self.frame_width = actual_w
                     self.frame_height = actual_h
@@ -510,10 +542,10 @@ class InferencePipeline:
                 # Read frame with timeout
                 try:
                     ret, frame = await asyncio.wait_for(
-                        loop.run_in_executor(None, lambda: cap.read()),
+                        loop.run_in_executor(None, lambda: cap.read()),  # noqa: B023
                         timeout=READ_TIMEOUT_S,
                     )
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     logger.warning("Frame read timeout — skipping frame {}", frame_idx)
                     frame_idx += 1
                     continue
@@ -562,7 +594,7 @@ class InferencePipeline:
                         pass
 
                 await self._queue.put(result)
-                
+
                 # Optional: GC periodically to manage memory
                 if frame_idx % 100 == 0:
                     gc.collect()
@@ -588,7 +620,7 @@ class InferencePipeline:
         Synchronous frame processing — runs in thread executor.
         Pipeline: Enhance → Detect → Track → [Pose] → [Machinery] → [Fire] → Heatmap → Annotate
         """
-        t0 = time.perf_counter()
+        time.perf_counter()
         h, w = frame_bgr.shape[:2]
         enhancement_stats = None
 
@@ -613,7 +645,7 @@ class InferencePipeline:
             violations = [d for d in tracked if d.is_violation]
 
         # 3. Optional: Pose detection + hazard evaluation
-        pose_hazards: List[PoseHazard] = []
+        pose_hazards: list[PoseHazard] = []
         if self._pose_detector and ENABLE_POSE_DETECTION:
             try:
                 poses = self._pose_detector.detect(frame_bgr, frame_idx=frame_idx)
@@ -627,8 +659,8 @@ class InferencePipeline:
                 logger.debug("Pose detection failed: {}", e)
 
         # 4. Optional: Machinery detection + proximity
-        machines: List[MachineryDetection] = []
-        proximity_alerts: List[ProximityAlert] = []
+        machines: list[MachineryDetection] = []
+        proximity_alerts: list[ProximityAlert] = []
         if self._machinery_detector and self._proximity_engine.is_calibrated:
             try:
                 machines = self._machinery_detector.detect(frame_bgr, frame_idx)
@@ -643,8 +675,8 @@ class InferencePipeline:
                 logger.debug("Machinery/proximity detection failed: {}", e)
 
         # 5. Optional: Fire detection
-        fire_detections: List[FireDetection] = []
-        fire_status: Dict[str, Any] = {}
+        fire_detections: list[FireDetection] = []
+        fire_status: dict[str, Any] = {}
         if self._fire_detector:
             try:
                 fire_detections = self._fire_detector.detect(frame_bgr, frame_idx)
@@ -654,7 +686,7 @@ class InferencePipeline:
 
         # 6. Heatmap update (from PPE violations)
         for det in violations:
-            x1, y1, x2, y2 = [int(v) for v in det.bbox_xyxy]
+            x1, y1, x2, y2 = (int(v) for v in det.bbox_xyxy)
             self.heatmap.update(x1, y1, x2, y2)
         self.heatmap.tick()
         heatmap_overlay = self.heatmap.get_overlay(frame_bgr)
@@ -698,33 +730,35 @@ class InferencePipeline:
     def _annotate(
         self,
         frame: np.ndarray,
-        tracked: List[TrackedDetection],
-        violations: List[TrackedDetection],
-        pose_hazards: List[PoseHazard],
-        proximity_alerts: List[ProximityAlert],
-        fire_detections: List[FireDetection],
+        tracked: list[TrackedDetection],
+        violations: list[TrackedDetection],
+        pose_hazards: list[PoseHazard],
+        proximity_alerts: list[ProximityAlert],
+        fire_detections: list[FireDetection],
     ) -> np.ndarray:
         """Draw all overlays on frame."""
         frame = self._draw_zones(frame)
         frame = self._draw_detections(frame, tracked)
-        
+
         # Draw pose skeletons if hazards present
         if pose_hazards and self._pose_detector:
             frame = self._draw_poses(frame, pose_hazards)
-        
+
         # Draw proximity lines
         if proximity_alerts and self._machinery_detector:
             frame = self._proximity_engine.draw_proximity_lines(
-                frame, proximity_alerts, []  # Pass machines if needed
+                frame,
+                proximity_alerts,
+                [],  # Pass machines if needed
             )
-        
+
         # Draw fire overlay
         if fire_detections and self._fire_detector:
             frame = self._fire_detector.annotate(frame, fire_detections)
-        
+
         # Draw stats
         frame = self._draw_stats(frame, tracked, violations, pose_hazards, fire_detections)
-        
+
         return frame
 
     def _draw_zones(self, frame: np.ndarray) -> np.ndarray:
@@ -738,26 +772,30 @@ class InferencePipeline:
             cx = int(polygon[:, 0].mean())
             cy = int(polygon[:, 1].mean())
             cv2.putText(
-                frame, zone_id,
+                frame,
+                zone_id,
                 (cx - 40, cy),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                DEFAULT_LABEL_FONT_SCALE, _ZONE_COLOR, DEFAULT_LABEL_THICKNESS, cv2.LINE_AA,
+                DEFAULT_LABEL_FONT_SCALE,
+                _ZONE_COLOR,
+                DEFAULT_LABEL_THICKNESS,
+                cv2.LINE_AA,
             )
         return frame
 
     def _draw_detections(
         self,
         frame: np.ndarray,
-        tracked: List[TrackedDetection],
+        tracked: list[TrackedDetection],
     ) -> np.ndarray:
         """Draw bounding boxes, track IDs, and violation markers."""
         for det in tracked:
-            x1, y1, x2, y2 = [int(v) for v in det.bbox_xyxy]
+            x1, y1, x2, y2 = (int(v) for v in det.bbox_xyxy)
             # Clamp to frame bounds
             h, w = frame.shape[:2]
             x1, x2 = max(0, x1), min(w, x2)
             y1, y2 = max(0, y1), min(h, y2)
-            
+
             color = _CLASS_COLORS.get(det.class_name, _DEFAULT_COLOR)
             color_bgr = (color[2], color[1], color[0])  # RGB → BGR
             thickness = 3 if det.is_violation else 2
@@ -776,42 +814,52 @@ class InferencePipeline:
                 frame,
                 (x1, max(0, y1 - lh - 6)),
                 (x1 + lw + 4, y1),
-                color_bgr, -1,
+                color_bgr,
+                -1,
             )
             cv2.putText(
-                frame, label,
+                frame,
+                label,
                 (x1 + 2, max(12, y1 - 3)),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                DEFAULT_LABEL_FONT_SCALE, (255, 255, 255), DEFAULT_LABEL_THICKNESS, cv2.LINE_AA,
+                DEFAULT_LABEL_FONT_SCALE,
+                (255, 255, 255),
+                DEFAULT_LABEL_THICKNESS,
+                cv2.LINE_AA,
             )
 
             # Violation marker
             if det.is_violation:
                 cv2.putText(
-                    frame, "!",
+                    frame,
+                    "!",
                     (max(x2 - 20, 5), min(y1 + 20, h - 5)),
                     cv2.FONT_HERSHEY_SIMPLEX,
-                    0.8, color_bgr, 2, cv2.LINE_AA,
+                    0.8,
+                    color_bgr,
+                    2,
+                    cv2.LINE_AA,
                 )
         return frame
 
     def _draw_poses(
         self,
         frame: np.ndarray,
-        pose_hazards: List[PoseHazard],
+        pose_hazards: list[PoseHazard],
     ) -> np.ndarray:
         """Draw pose skeletons with hazard highlighting."""
         if not self._pose_detector:
             return frame
-            
-        is_hazard = len(pose_hazards) > 0
+
+        if not pose_hazards:
+            return frame
         # Get unique poses from hazards (simplified — in prod, match by track_id)
-        for hazard in pose_hazards:
+        for _ in pose_hazards:
             # Draw skeleton with hazard color
             # Note: In prod, you'd have pose.landmarks from detector
             # This is a placeholder — actual implementation needs pose→hazard mapping
             pass
-        
+
         # Hazard banner
         if pose_hazards:
             severity_colors = {
@@ -827,20 +875,23 @@ class InferencePipeline:
                     f"POSE: {hazard.hazard_type.replace('_', ' ').upper()}",
                     (10, frame.shape[0] - 40),
                     cv2.FONT_HERSHEY_SIMPLEX,
-                    0.55, color, 2, cv2.LINE_AA,
+                    0.55,
+                    color,
+                    2,
+                    cv2.LINE_AA,
                 )
         return frame
 
     def _draw_stats(
         self,
         frame: np.ndarray,
-        tracked: List[TrackedDetection],
-        violations: List[TrackedDetection],
-        pose_hazards: List[PoseHazard],
-        fire_detections: List[FireDetection],
+        tracked: list[TrackedDetection],
+        violations: list[TrackedDetection],
+        pose_hazards: list[PoseHazard],
+        fire_detections: list[FireDetection],
     ) -> np.ndarray:
         """Draw frame-level stats overlay."""
-        h = frame.shape[0]
+        frame.shape[0]
         stats = [
             f"Tracks:{len(tracked)}",
             f"Violations:{len(violations)}",
@@ -850,17 +901,20 @@ class InferencePipeline:
             stats.append(f"PoseHaz:{len(pose_hazards)}")
         if fire_detections:
             stats.append(f"Fire:{len(fire_detections)}")
-        
+
         cv2.putText(
             frame,
             "  ".join(stats),
             (10, 28),
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.65, (255, 255, 255), 2, cv2.LINE_AA,
+            0.65,
+            (255, 255, 255),
+            2,
+            cv2.LINE_AA,
         )
         return frame
 
-    def get_diagnostics(self) -> Dict[str, Any]:
+    def get_diagnostics(self) -> dict[str, Any]:
         """Return pipeline status for health checks."""
         return {
             "running": self._running,
@@ -880,7 +934,7 @@ class InferencePipeline:
 
 
 # ── Singleton with lazy initialization ───────────────────────
-_pipeline_instance: Optional[InferencePipeline] = None
+_pipeline_instance: InferencePipeline | None = None
 
 
 def get_inference_pipeline(**kwargs) -> InferencePipeline:
@@ -893,7 +947,6 @@ def get_inference_pipeline(**kwargs) -> InferencePipeline:
 
 # ── Smoke test ───────────────────────────────────────────────
 if __name__ == "__main__":
-    import sys
 
     async def main():
         pipeline = InferencePipeline(

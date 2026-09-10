@@ -22,33 +22,30 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass, field
-from typing import List, Optional
 
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import StrOutputParser
-from langchain_core.runnables import RunnablePassthrough, RunnableLambda
 from langchain_core.documents import Document
 from loguru import logger
 
-from .vector_store import get_unified_retriever
 from backend.llm import llm_manager as _llm_manager  # Enterprise LLM fallback chain
 
+from .vector_store import get_unified_retriever
+
 # ── Config ────────────────────────────────────────────────────
-OLLAMA_BASE_URL  = os.getenv("OLLAMA_BASE_URL",  "http://localhost:11434")
-OLLAMA_MODEL     = os.getenv("OLLAMA_MODEL",     "llama3")
-RAG_TOP_K        = int(os.getenv("RAG_TOP_K",   "5"))
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3")
+RAG_TOP_K = int(os.getenv("RAG_TOP_K", "5"))
 RAG_SCORE_THRESH = float(os.getenv("RAG_SCORE_THRESHOLD", "0.35"))
 
 # ── Security: Prompt injection guardrails ─────────────────────
 _PROMPT_INJECTION_PATTERNS = [
-    r'ignore\s+(previous|all)\s+instructions',
-    r'system\s*(prompt|message|instruction)',
-    r'you\s+are\s+(now|no\s+longer)',
-    r'forget\s+(all|everything)',
-    r'bypass\s+(security|filters)',
-    r'output\s+(raw|unfiltered|original)',
-    r'print\s*(your\s*)?(instructions|prompt)',
-    r'disregard\s+(all\s+)?rules',
+    r"ignore\s+(previous|all)\s+instructions",
+    r"system\s*(prompt|message|instruction)",
+    r"you\s+are\s+(now|no\s+longer)",
+    r"forget\s+(all|everything)",
+    r"bypass\s+(security|filters)",
+    r"output\s+(raw|unfiltered|original)",
+    r"print\s*(your\s*)?(instructions|prompt)",
+    r"disregard\s+(all\s+)?rules",
 ]
 
 _MAX_QUERY_LENGTH = 2000
@@ -59,23 +56,23 @@ _MAX_SOURCES = 10  # Bounded memory for retrieved docs
 def _sanitize_query(query: str) -> str:
     """
     Sanitize user query to prevent prompt injection attacks.
-    
+
     # FIXED: Comprehensive pattern matching + early truncation
     """
     if not query:
         return ""
-    
+
     # Early truncation to limit attack surface
     if len(query) > _MAX_QUERY_LENGTH:
         logger.warning("Query truncated from {} to {} chars", len(query), _MAX_QUERY_LENGTH)
         query = query[:_MAX_QUERY_LENGTH]
-    
+
     sanitized = query.strip()
-    
+
     # Redact injection patterns (case-insensitive)
     for pattern in _PROMPT_INJECTION_PATTERNS:
-        sanitized = re.sub(pattern, '[REDACTED_QUERY]', sanitized, flags=re.IGNORECASE)
-    
+        sanitized = re.sub(pattern, "[REDACTED_QUERY]", sanitized, flags=re.IGNORECASE)
+
     return sanitized
 
 
@@ -109,23 +106,24 @@ ANSWER (with citations):"""
 @dataclass
 class ChatResponse:
     """Structured response from the RAG chatbot."""
-    answer      : str
-    sources     : List[dict] = field(default_factory=list)
-    model_used  : str = ""
-    retrieval_k : int = 0
-    error       : Optional[str] = None  # FIXED: Explicit error field
+
+    answer: str
+    sources: list[dict] = field(default_factory=list)
+    model_used: str = ""
+    retrieval_k: int = 0
+    error: str | None = None  # FIXED: Explicit error field
 
 
-def _format_docs(docs: List[Document]) -> str:
+def _format_docs(docs: list[Document]) -> str:
     """Format retrieved documents into a context string."""
     if not docs:
         return "No relevant documents found in the safety knowledge base."
 
     parts = []
     for i, doc in enumerate(docs, 1):
-        source   = doc.metadata.get("source", "unknown")
+        source = doc.metadata.get("source", "unknown")
         filename = doc.metadata.get("filename", "")
-        ts       = doc.metadata.get("timestamp", "")
+        ts = doc.metadata.get("timestamp", "")
 
         header = f"[{i}] Source: {source}"
         if filename:
@@ -144,7 +142,7 @@ def _format_docs(docs: List[Document]) -> str:
     return "\n\n---\n\n".join(parts)
 
 
-def _docs_to_sources(docs: List[Document]) -> List[dict]:
+def _docs_to_sources(docs: list[Document]) -> list[dict]:
     """Convert retrieved docs to a serialisable sources list for the API."""
     sources = []
     for doc in docs:
@@ -154,20 +152,22 @@ def _docs_to_sources(docs: List[Document]) -> List[dict]:
         ts = doc.metadata.get("timestamp", "")
         zone_id = doc.metadata.get("zone_id", "")
         class_name = doc.metadata.get("class_name", "")
-        
+
         # Truncate excerpt for API response
         excerpt = doc.page_content
         if len(excerpt) > 200:
             excerpt = excerpt[:200] + "..."
-        
-        sources.append({
-            "source"    : source,
-            "filename"  : filename,
-            "timestamp" : str(ts)[:16] if ts else "",
-            "zone_id"   : zone_id,
-            "class_name": class_name,
-            "excerpt"   : excerpt,
-        })
+
+        sources.append(
+            {
+                "source": source,
+                "filename": filename,
+                "timestamp": str(ts)[:16] if ts else "",
+                "zone_id": zone_id,
+                "class_name": class_name,
+                "excerpt": excerpt,
+            }
+        )
     return sources
 
 
@@ -180,7 +180,7 @@ class SafetyChatbot:
         response = await bot.ask("How many no-helmet violations in zone-A this week?")
         print(response.answer)
         print(response.sources)
-    
+
     # FIXED: Bounded memory + injection protection + async-safe errors
     """
 
@@ -188,20 +188,22 @@ class SafetyChatbot:
         llm_status = _llm_manager.get_status()
         logger.info(
             "Initialising SafetyChatbot | llm_model={} | top_k={} | groq={}",
-            llm_status["active_model"], RAG_TOP_K, llm_status["groq"],
+            llm_status["active_model"],
+            RAG_TOP_K,
+            llm_status["groq"],
         )
 
         self._retriever = get_unified_retriever(
-            top_k           = RAG_TOP_K,
-            score_threshold = RAG_SCORE_THRESH,
+            top_k=RAG_TOP_K,
+            score_threshold=RAG_SCORE_THRESH,
         )
 
         # FIXED: Bounded list to prevent memory growth
-        self._last_docs: List[Document] = []
+        self._last_docs: list[Document] = []
 
         logger.info("SafetyChatbot ready (LLMManager: Groq→OpenRouter→Ollama→Template)")
 
-    def _store_and_format(self, docs: List[Document]) -> str:
+    def _store_and_format(self, docs: list[Document]) -> str:
         """Store retrieved docs (bounded) then format them."""
         # FIXED: Keep only last N docs to prevent unbounded memory growth
         self._last_docs = docs[-_MAX_SOURCES:] if len(docs) > _MAX_SOURCES else docs
@@ -223,8 +225,7 @@ class SafetyChatbot:
         # FIXED: Validate early
         if not question or not question.strip():
             return ChatResponse(
-                answer="Please ask a specific safety question.",
-                error="empty_query"
+                answer="Please ask a specific safety question.", error="empty_query"
             )
 
         # SECURITY FIX: Sanitize BEFORE any logging or processing
@@ -239,7 +240,9 @@ class SafetyChatbot:
                 docs = await self._retriever.ainvoke(safe_question)
                 self._last_docs = docs[-_MAX_SOURCES:] if len(docs) > _MAX_SOURCES else docs
             except Exception as retrieval_exc:
-                logger.warning("Retriever failed: {} — answering without context", type(retrieval_exc).__name__)
+                logger.warning(
+                    "Retriever failed: {} — answering without context", type(retrieval_exc).__name__
+                )
                 self._last_docs = []
 
             context_str = _format_docs(self._last_docs)
@@ -252,7 +255,9 @@ class SafetyChatbot:
 
             # FIXED: Truncate answer to prevent overflow
             if len(answer) > _MAX_ANSWER_LENGTH:
-                logger.warning("Answer truncated from {} to {} chars", len(answer), _MAX_ANSWER_LENGTH)
+                logger.warning(
+                    "Answer truncated from {} to {} chars", len(answer), _MAX_ANSWER_LENGTH
+                )
                 answer = answer[:_MAX_ANSWER_LENGTH] + "..."
 
         except Exception as exc:
@@ -260,21 +265,23 @@ class SafetyChatbot:
             # Don't leak internal error details to user
             return ChatResponse(
                 answer="I encountered an error processing your request. Please try again.",
-                error=f"service_error: {type(exc).__name__}"
+                error=f"service_error: {type(exc).__name__}",
             )
 
         sources = _docs_to_sources(self._last_docs)
         active_model = _llm_manager.get_status()["active_model"]
         logger.info(
             "RAG response generated | model={} | sources={} | answer_len={}",
-            active_model, len(sources), len(answer),
+            active_model,
+            len(sources),
+            len(answer),
         )
 
         return ChatResponse(
-            answer      = answer,
-            sources     = sources,
-            model_used  = active_model,
-            retrieval_k = len(self._last_docs),
+            answer=answer,
+            sources=sources,
+            model_used=active_model,
+            retrieval_k=len(self._last_docs),
         )
 
 
@@ -282,7 +289,7 @@ class SafetyChatbot:
 # Loaded once at startup, reused across all requests.
 # Initialised lazily to avoid blocking startup.
 
-_chatbot_instance: Optional[SafetyChatbot] = None
+_chatbot_instance: SafetyChatbot | None = None
 
 
 def get_chatbot() -> SafetyChatbot:

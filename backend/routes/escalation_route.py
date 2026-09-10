@@ -18,18 +18,17 @@ Endpoints:
   GET  /escalation/stats             → Escalation statistics
   POST /escalation/trigger/{violation_id} → Manual trigger (for testing)
 """
-import os
-from datetime import datetime, timezone, timedelta
-from typing import Optional
+
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from loguru import logger
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlmodel.ext.asyncio.session import AsyncSession
-from loguru import logger
 
 from backend.database import get_session
-from backend.middleware.rate_limiter import limiter, LIMIT_DEFAULT
+from backend.middleware.rate_limiter import LIMIT_DEFAULT, limiter
 
 router = APIRouter(prefix="/escalation", tags=["escalation"])
 
@@ -57,7 +56,7 @@ ESCALATION_LEVELS = {
     },
     4: {
         "name": "Emergency Response",
-        "timeout_minutes": 0,   # Immediate — no wait window
+        "timeout_minutes": 0,  # Immediate — no wait window
         "notification_channel": "all",
         "description": "Emergency — all channels, immediate response required",
     },
@@ -66,17 +65,19 @@ ESCALATION_LEVELS = {
 
 # ── Request models ────────────────────────────────────────────
 
+
 class AcknowledgeRequest(BaseModel):
     acknowledged_by: str = Field(min_length=1, max_length=100)
-    notes: Optional[str] = Field(default=None, max_length=500)
+    notes: str | None = Field(default=None, max_length=500)
 
 
 # ── Escalation trigger (called by background scheduler) ───────
 
+
 async def trigger_escalation(
     violation_id: int,
-    org_id: Optional[str],
-    site_id: Optional[str],
+    org_id: str | None,
+    site_id: str | None,
     session: AsyncSession,
 ) -> dict:
     """
@@ -84,32 +85,33 @@ async def trigger_escalation(
     Called automatically when a violation is detected.
     """
     # Check if escalation already exists
-    result = await session.exec(text("""
+    result = await session.exec(
+        text("""
         SELECT id, level, status FROM alert_escalations
         WHERE violation_id = :violation_id AND status IN ('open', 'escalated')
         ORDER BY level DESC LIMIT 1
-    """).bindparams(violation_id=violation_id))
+    """).bindparams(violation_id=violation_id)
+    )
     existing = result.fetchone()
 
     if existing:
         return {"status": "already_exists", "level": existing.level, "id": existing.id}
 
     # Create L1 escalation
-    await session.exec(text("""
+    await session.exec(
+        text("""
         INSERT INTO alert_escalations
             (violation_id, org_id, site_id, level, status, notified_at)
         VALUES
             (:violation_id, :org_id, :site_id, 1, 'open', CURRENT_TIMESTAMP)
     """).bindparams(
-        violation_id=violation_id,
-        org_id=org_id,
-        site_id=site_id,
-    ))
-
-    logger.info(
-        "Escalation L1 created | violation_id={} | org_id={}",
-        violation_id, org_id
+            violation_id=violation_id,
+            org_id=org_id,
+            site_id=site_id,
+        )
     )
+
+    logger.info("Escalation L1 created | violation_id={} | org_id={}", violation_id, org_id)
     return {"status": "created", "level": 1}
 
 
@@ -118,18 +120,20 @@ async def run_escalation_check(session: AsyncSession) -> dict:
     Background task — check for overdue escalations and escalate.
     Should be called every 60 seconds by APScheduler.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     escalated_count = 0
     closed_count = 0
 
     # Get all open escalations
-    result = await session.exec(text("""
+    result = await session.exec(
+        text("""
         SELECT ae.id, ae.violation_id, ae.org_id, ae.level, ae.notified_at
         FROM alert_escalations ae
         WHERE ae.status = 'open'
         ORDER BY ae.notified_at ASC
         LIMIT 100
-    """))
+    """)
+    )
     open_alerts = result.fetchall()
 
     for alert in open_alerts:
@@ -147,7 +151,7 @@ async def run_escalation_check(session: AsyncSession) -> dict:
         try:
             notified = datetime.fromisoformat(str(alert.notified_at).replace("Z", "+00:00"))
             if notified.tzinfo is None:
-                notified = notified.replace(tzinfo=timezone.utc)
+                notified = notified.replace(tzinfo=UTC)
         except (ValueError, TypeError):
             continue
 
@@ -158,30 +162,36 @@ async def run_escalation_check(session: AsyncSession) -> dict:
             next_config = ESCALATION_LEVELS.get(next_level, {})
 
             # Mark current as escalated, create next level
-            await session.exec(text("""
+            await session.exec(
+                text("""
                 UPDATE alert_escalations
                 SET status = 'escalated',
                     escalation_reason = :reason
                 WHERE id = :id
             """).bindparams(
-                id=alert.id,
-                reason=f"No response in {timeout_mins} minutes — escalated to L{next_level}",
-            ))
+                    id=alert.id,
+                    reason=f"No response in {timeout_mins} minutes — escalated to L{next_level}",
+                )
+            )
 
-            await session.exec(text("""
+            await session.exec(
+                text("""
                 INSERT INTO alert_escalations
                     (violation_id, org_id, level, status, notified_at)
                 VALUES
                     (:violation_id, :org_id, :next_level, 'open', CURRENT_TIMESTAMP)
             """).bindparams(
-                violation_id=alert.violation_id,
-                org_id=alert.org_id,
-                next_level=next_level,
-            ))
+                    violation_id=alert.violation_id,
+                    org_id=alert.org_id,
+                    next_level=next_level,
+                )
+            )
 
             logger.warning(
                 "Alert escalated | violation={} | L{} → L{} | {} ({})",
-                alert.violation_id, current_level, next_level,
+                alert.violation_id,
+                current_level,
+                next_level,
                 next_config.get("name", "Unknown"),
                 next_config.get("notification_channel", "?"),
             )
@@ -197,12 +207,13 @@ async def run_escalation_check(session: AsyncSession) -> dict:
 
 # ── Routes ────────────────────────────────────────────────────
 
+
 @router.get("/open")
 @limiter.limit(LIMIT_DEFAULT)
 async def get_open_escalations(
     request: Request,
-    org_id: Optional[str] = None,
-    level: Optional[int] = None,
+    org_id: str | None = None,
+    level: int | None = None,
     session: AsyncSession = Depends(get_session),
 ):
     """Get all open/escalated alerts."""
@@ -218,7 +229,8 @@ async def get_open_escalations(
 
     where = "WHERE " + " AND ".join(conditions)
 
-    result = await session.exec(text(f"""
+    result = await session.exec(
+        text(f"""
         SELECT ae.id, ae.violation_id, ae.org_id, ae.site_id,
                ae.level, ae.status, ae.notified_at, ae.escalation_reason,
                ve.class_name, ve.zone_id, ve.confidence, ve.timestamp as violation_ts
@@ -227,7 +239,9 @@ async def get_open_escalations(
         {where}
         ORDER BY ae.level DESC, ae.notified_at ASC
         LIMIT 200
-    """).bindparams(**params) if params else text(f"""
+    """).bindparams(**params)
+        if params
+        else text(f"""
         SELECT ae.id, ae.violation_id, ae.org_id, ae.site_id,
                ae.level, ae.status, ae.notified_at, ae.escalation_reason,
                ve.class_name, ve.zone_id, ve.confidence, ve.timestamp as violation_ts
@@ -236,11 +250,12 @@ async def get_open_escalations(
         {where}
         ORDER BY ae.level DESC, ae.notified_at ASC
         LIMIT 200
-    """))
+    """)
+    )
 
     rows = result.fetchall()
     alerts = []
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     for row in rows:
         d = dict(row._mapping)
@@ -253,7 +268,7 @@ async def get_open_escalations(
             try:
                 notified = datetime.fromisoformat(str(d["notified_at"]).replace("Z", "+00:00"))
                 if notified.tzinfo is None:
-                    notified = notified.replace(tzinfo=timezone.utc)
+                    notified = notified.replace(tzinfo=UTC)
                 d["minutes_open"] = round((now - notified).total_seconds() / 60, 1)
             except (ValueError, TypeError):
                 d["minutes_open"] = None
@@ -275,13 +290,15 @@ async def get_escalation_status(
     session: AsyncSession = Depends(get_session),
 ):
     """Get full escalation history for a violation."""
-    result = await session.exec(text("""
+    result = await session.exec(
+        text("""
         SELECT ae.id, ae.level, ae.status, ae.notified_at,
                ae.acknowledged_by, ae.acknowledged_at, ae.escalation_reason
         FROM alert_escalations ae
         WHERE ae.violation_id = :violation_id
         ORDER BY ae.level ASC
-    """).bindparams(violation_id=violation_id))
+    """).bindparams(violation_id=violation_id)
+    )
 
     rows = result.fetchall()
     history = []
@@ -293,8 +310,7 @@ async def get_escalation_status(
 
     if not history:
         raise HTTPException(
-            status_code=404,
-            detail=f"No escalation found for violation {violation_id}"
+            status_code=404, detail=f"No escalation found for violation {violation_id}"
         )
 
     current = max(history, key=lambda x: x["level"])
@@ -316,18 +332,19 @@ async def acknowledge_escalation(
     session: AsyncSession = Depends(get_session),
 ):
     """Acknowledge an escalation alert."""
-    result = await session.exec(text("""
+    result = await session.exec(
+        text("""
         UPDATE alert_escalations
         SET status = 'acknowledged',
             acknowledged_by = :acknowledged_by,
             acknowledged_at = CURRENT_TIMESTAMP
         WHERE id = :id AND status = 'open'
-    """).bindparams(id=escalation_id, acknowledged_by=body.acknowledged_by))
+    """).bindparams(id=escalation_id, acknowledged_by=body.acknowledged_by)
+    )
 
     if result.rowcount == 0:
         raise HTTPException(
-            status_code=404,
-            detail=f"Escalation {escalation_id} not found or already acknowledged"
+            status_code=404, detail=f"Escalation {escalation_id} not found or already acknowledged"
         )
 
     logger.info("Alert acknowledged | id={} | by={}", escalation_id, body.acknowledged_by)
@@ -335,7 +352,7 @@ async def acknowledge_escalation(
         "escalation_id": escalation_id,
         "status": "acknowledged",
         "acknowledged_by": body.acknowledged_by,
-        "acknowledged_at": datetime.now(timezone.utc).isoformat(),
+        "acknowledged_at": datetime.now(UTC).isoformat(),
     }
 
 
@@ -344,8 +361,8 @@ async def acknowledge_escalation(
 async def manual_trigger(
     request: Request,
     violation_id: int,
-    org_id: Optional[str] = None,
-    site_id: Optional[str] = None,
+    org_id: str | None = None,
+    site_id: str | None = None,
     session: AsyncSession = Depends(get_session),
 ):
     """Manually trigger escalation for a violation (testing / force-escalate)."""
@@ -360,7 +377,8 @@ async def escalation_stats(
     session: AsyncSession = Depends(get_session),
 ):
     """Get escalation statistics for the dashboard."""
-    result = await session.exec(text("""
+    result = await session.exec(
+        text("""
         SELECT
             level,
             status,
@@ -368,7 +386,8 @@ async def escalation_stats(
         FROM alert_escalations
         GROUP BY level, status
         ORDER BY level, status
-    """))
+    """)
+    )
     rows = result.fetchall()
 
     stats: dict = {

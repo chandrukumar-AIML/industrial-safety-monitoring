@@ -14,23 +14,23 @@ All application DB access goes through get_session().
 from __future__ import annotations
 
 import os
-import re
-from typing import AsyncGenerator, Optional
+from collections.abc import AsyncGenerator
 
 # Load .env before reading DATABASE_URL (database.py is imported before main.py runs load_dotenv)
 try:
     from dotenv import load_dotenv
+
     load_dotenv()
 except ImportError:
     pass
 from urllib.parse import urlparse, urlunparse
 
+from loguru import logger
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+from sqlalchemy.orm import sessionmaker
 from sqlmodel import SQLModel
 from sqlmodel.ext.asyncio.session import AsyncSession
-from sqlalchemy.orm import sessionmaker
-from loguru import logger
 
 # ── Config: Load from env with validation ─────────────────────
 # Production: postgresql+asyncpg://user:pass@host:5432/dbname
@@ -55,11 +55,11 @@ if not DATABASE_URL or not any(DATABASE_URL.startswith(p) for p in _VALID_URL_PR
 
 # ── Dialect helpers (SQLite vs PostgreSQL DDL differs) ────────
 IS_POSTGRES = DATABASE_URL.startswith("postgresql")
-_PK   = "BIGSERIAL PRIMARY KEY" if IS_POSTGRES else "INTEGER PRIMARY KEY AUTOINCREMENT"
-_TS   = "TIMESTAMPTZ DEFAULT NOW()" if IS_POSTGRES else "DATETIME DEFAULT CURRENT_TIMESTAMP"
+_PK = "BIGSERIAL PRIMARY KEY" if IS_POSTGRES else "INTEGER PRIMARY KEY AUTOINCREMENT"
+_TS = "TIMESTAMPTZ DEFAULT NOW()" if IS_POSTGRES else "DATETIME DEFAULT CURRENT_TIMESTAMP"
 _BLOB = "BYTEA" if IS_POSTGRES else "BLOB"
-_F    = "BOOLEAN DEFAULT FALSE" if IS_POSTGRES else "BOOLEAN DEFAULT 0"
-_T    = "BOOLEAN DEFAULT TRUE"  if IS_POSTGRES else "BOOLEAN DEFAULT 1"
+_F = "BOOLEAN DEFAULT FALSE" if IS_POSTGRES else "BOOLEAN DEFAULT 0"
+_T = "BOOLEAN DEFAULT TRUE" if IS_POSTGRES else "BOOLEAN DEFAULT 1"
 
 # Connection pool settings (tune for production)
 POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "10"))
@@ -71,7 +71,7 @@ POOL_RECYCLE = int(os.getenv("DB_POOL_RECYCLE", "3600"))  # 1 hour
 def _mask_credentials(url: str) -> str:
     """
     Mask credentials in DB URL for safe logging.
-    
+
     postgres://user:pass@host/db → postgres://user:***@host/db
     SQLite URLs have no credentials — returned as-is.
     """
@@ -114,12 +114,12 @@ def _build_connect_args(url: str) -> dict:
 def make_engine(url: str = DATABASE_URL) -> AsyncEngine:
     """
     Create an async SQLAlchemy engine for the given database URL.
-    
+
     Exposed as a factory so tests can inject an in-memory engine.
-    
+
     Args:
         url: SQLAlchemy async database URL.
-        
+
     Returns:
         Configured AsyncEngine instance.
     """
@@ -132,22 +132,24 @@ def make_engine(url: str = DATABASE_URL) -> AsyncEngine:
         "pool_pre_ping": True,
     }
     if not is_sqlite:
-        kwargs.update({
-            "pool_size": POOL_SIZE,
-            "max_overflow": MAX_OVERFLOW,
-            "pool_timeout": POOL_TIMEOUT,
-            "pool_recycle": POOL_RECYCLE,
-        })
+        kwargs.update(
+            {
+                "pool_size": POOL_SIZE,
+                "max_overflow": MAX_OVERFLOW,
+                "pool_timeout": POOL_TIMEOUT,
+                "pool_recycle": POOL_RECYCLE,
+            }
+        )
     return create_async_engine(url, **kwargs)
 
 
 def make_session_factory(eng: AsyncEngine) -> sessionmaker:
     """
     Create an async session factory bound to the given engine.
-    
+
     Args:
         eng: AsyncEngine to bind sessions to.
-        
+
     Returns:
         sessionmaker configured for async use.
     """
@@ -165,7 +167,7 @@ engine: AsyncEngine = make_engine()
 AsyncSessionLocal: sessionmaker = make_session_factory(engine)
 
 
-async def init_db(eng: Optional[AsyncEngine] = None) -> None:
+async def init_db(eng: AsyncEngine | None = None) -> None:
     """
     Create all SQLModel tables. Call once at application startup.
 
@@ -187,7 +189,8 @@ async def init_db(eng: Optional[AsyncEngine] = None) -> None:
             # ── Raw SQL tables (not managed by SQLModel ORM) ───────
 
             # Users table — email/password auth
-            await conn.execute(text(f"""
+            await conn.execute(
+                text(f"""
                 CREATE TABLE IF NOT EXISTS users (
                     id              {_PK},
                     email           VARCHAR(256) UNIQUE NOT NULL,
@@ -198,9 +201,11 @@ async def init_db(eng: Optional[AsyncEngine] = None) -> None:
                     is_active       {_T},
                     created_at      {_TS}
                 )
-            """))
+            """)
+            )
 
-            await conn.execute(text(f"""
+            await conn.execute(
+                text(f"""
                 CREATE TABLE IF NOT EXISTS worker_profiles (
                     id             {_PK},
                     worker_id      VARCHAR(64)  UNIQUE NOT NULL,
@@ -217,9 +222,11 @@ async def init_db(eng: Optional[AsyncEngine] = None) -> None:
                     enrolled_at    TIMESTAMP,
                     created_at     TIMESTAMP
                 )
-            """))
+            """)
+            )
 
-            await conn.execute(text(f"""
+            await conn.execute(
+                text(f"""
                 CREATE TABLE IF NOT EXISTS camera_registry (
                     id               {_PK},
                     camera_id        VARCHAR(64) UNIQUE NOT NULL,
@@ -235,9 +242,11 @@ async def init_db(eng: Optional[AsyncEngine] = None) -> None:
                     updated_at       TIMESTAMP,
                     created_at       {_TS}
                 )
-            """))
+            """)
+            )
 
-            await conn.execute(text(f"""
+            await conn.execute(
+                text(f"""
                 CREATE TABLE IF NOT EXISTS camera_zones (
                     id                  {_PK},
                     zone_id             VARCHAR(64) UNIQUE NOT NULL,
@@ -253,9 +262,11 @@ async def init_db(eng: Optional[AsyncEngine] = None) -> None:
                     active              {_T},
                     created_at          {_TS}
                 )
-            """))
+            """)
+            )
 
-            await conn.execute(text(f"""
+            await conn.execute(
+                text(f"""
                 CREATE TABLE IF NOT EXISTS violation_events (
                     id               {_PK},
                     track_id         INTEGER NOT NULL,
@@ -273,9 +284,11 @@ async def init_db(eng: Optional[AsyncEngine] = None) -> None:
                     timestamp        {_TS},
                     created_at       {_TS}
                 )
-            """))
+            """)
+            )
 
-            await conn.execute(text(f"""
+            await conn.execute(
+                text(f"""
                 CREATE TABLE IF NOT EXISTS worker_violations (
                     id           {_PK},
                     worker_id    VARCHAR(64) NOT NULL,
@@ -283,9 +296,11 @@ async def init_db(eng: Optional[AsyncEngine] = None) -> None:
                     timestamp    {_TS},
                     created_at   {_TS}
                 )
-            """))
+            """)
+            )
 
-            await conn.execute(text(f"""
+            await conn.execute(
+                text(f"""
                 CREATE TABLE IF NOT EXISTS agent_runs (
                     id               {_PK},
                     run_id           VARCHAR(64) UNIQUE NOT NULL,
@@ -302,9 +317,11 @@ async def init_db(eng: Optional[AsyncEngine] = None) -> None:
                     error            TEXT,
                     created_at       {_TS}
                 )
-            """))
+            """)
+            )
 
-            await conn.execute(text(f"""
+            await conn.execute(
+                text(f"""
                 CREATE TABLE IF NOT EXISTS incident_reports (
                     id                   {_PK},
                     violation_id         INTEGER,
@@ -330,9 +347,11 @@ async def init_db(eng: Optional[AsyncEngine] = None) -> None:
                     status               VARCHAR(32) DEFAULT 'generated',
                     created_at           {_TS}
                 )
-            """))
+            """)
+            )
 
-            await conn.execute(text(f"""
+            await conn.execute(
+                text(f"""
                 CREATE TABLE IF NOT EXISTS model_deployments (
                     id                  {_PK},
                     model_name          VARCHAR(128) NOT NULL,
@@ -353,9 +372,11 @@ async def init_db(eng: Optional[AsyncEngine] = None) -> None:
                     retired_at          TIMESTAMP,
                     created_at          {_TS}
                 )
-            """))
+            """)
+            )
 
-            await conn.execute(text(f"""
+            await conn.execute(
+                text(f"""
                 CREATE TABLE IF NOT EXISTS pose_hazard_events (
                     id             {_PK},
                     track_id       INTEGER NOT NULL,
@@ -370,9 +391,11 @@ async def init_db(eng: Optional[AsyncEngine] = None) -> None:
                     frame_idx      INTEGER DEFAULT 0,
                     timestamp      {_TS}
                 )
-            """))
+            """)
+            )
 
-            await conn.execute(text(f"""
+            await conn.execute(
+                text(f"""
                 CREATE TABLE IF NOT EXISTS proximity_alerts (
                     id               {_PK},
                     person_track_id  INTEGER NOT NULL,
@@ -387,9 +410,11 @@ async def init_db(eng: Optional[AsyncEngine] = None) -> None:
                     acknowledged     {_F},
                     timestamp        {_TS}
                 )
-            """))
+            """)
+            )
 
-            await conn.execute(text(f"""
+            await conn.execute(
+                text(f"""
                 CREATE TABLE IF NOT EXISTS fire_hazard_events (
                     id             {_PK},
                     hazard_type    VARCHAR(32) DEFAULT 'fire',
@@ -405,9 +430,11 @@ async def init_db(eng: Optional[AsyncEngine] = None) -> None:
                     acknowledged   {_F},
                     timestamp      {_TS}
                 )
-            """))
+            """)
+            )
 
-            await conn.execute(text(f"""
+            await conn.execute(
+                text(f"""
                 CREATE TABLE IF NOT EXISTS weekly_reports (
                     id               {_PK},
                     site_id          VARCHAR(64),
@@ -417,9 +444,11 @@ async def init_db(eng: Optional[AsyncEngine] = None) -> None:
                     pdf_path         VARCHAR(256),
                     created_at       {_TS}
                 )
-            """))
+            """)
+            )
             # ── Multi-tenant tables ────────────────────────────────
-            await conn.execute(text(f"""
+            await conn.execute(
+                text(f"""
                 CREATE TABLE IF NOT EXISTS organizations (
                     id                      {_PK},
                     org_id                  VARCHAR(64) UNIQUE NOT NULL,
@@ -438,9 +467,11 @@ async def init_db(eng: Optional[AsyncEngine] = None) -> None:
                     active                  {_T},
                     created_at              {_TS}
                 )
-            """))
+            """)
+            )
 
-            await conn.execute(text(f"""
+            await conn.execute(
+                text(f"""
                 CREATE TABLE IF NOT EXISTS industry_ppe_profiles (
                     id                  {_PK},
                     industry_type       VARCHAR(50) NOT NULL,
@@ -450,9 +481,11 @@ async def init_db(eng: Optional[AsyncEngine] = None) -> None:
                     compliance_standard VARCHAR(100) DEFAULT 'OSHA 1910.132',
                     notes               TEXT
                 )
-            """))
+            """)
+            )
 
-            await conn.execute(text(f"""
+            await conn.execute(
+                text(f"""
                 CREATE TABLE IF NOT EXISTS alert_escalations (
                     id                  {_PK},
                     violation_id        INTEGER NOT NULL,
@@ -466,9 +499,11 @@ async def init_db(eng: Optional[AsyncEngine] = None) -> None:
                     escalation_reason   VARCHAR(200),
                     created_at          {_TS}
                 )
-            """))
+            """)
+            )
 
-            await conn.execute(text(f"""
+            await conn.execute(
+                text(f"""
                 CREATE TABLE IF NOT EXISTS permits_to_work (
                     id              {_PK},
                     permit_id       VARCHAR(64) UNIQUE NOT NULL,
@@ -487,9 +522,11 @@ async def init_db(eng: Optional[AsyncEngine] = None) -> None:
                     risk_assessment TEXT,
                     created_at      {_TS}
                 )
-            """))
+            """)
+            )
 
-            await conn.execute(text(f"""
+            await conn.execute(
+                text(f"""
                 CREATE TABLE IF NOT EXISTS worker_attendance (
                     id              {_PK},
                     worker_id       VARCHAR(64) NOT NULL,
@@ -503,9 +540,11 @@ async def init_db(eng: Optional[AsyncEngine] = None) -> None:
                     exit_camera_id  VARCHAR(64),
                     created_at      {_TS}
                 )
-            """))
+            """)
+            )
 
-            await conn.execute(text(f"""
+            await conn.execute(
+                text(f"""
                 CREATE TABLE IF NOT EXISTS billing_subscriptions (
                     id                      {_PK},
                     org_id                  VARCHAR(64) UNIQUE NOT NULL,
@@ -520,12 +559,14 @@ async def init_db(eng: Optional[AsyncEngine] = None) -> None:
                     cancelled_at            TIMESTAMP,
                     created_at              {_TS}
                 )
-            """))
+            """)
+            )
 
             # ── Tables previously created lazily by route handlers ──
             # Without these at startup, a fresh deploy (e.g. Render) is missing
             # them until the first relevant API call — and demo auto-seed fails.
-            await conn.execute(text(f"""
+            await conn.execute(
+                text(f"""
                 CREATE TABLE IF NOT EXISTS alert_recipients (
                     id              {_PK},
                     name            VARCHAR(128) NOT NULL,
@@ -540,8 +581,10 @@ async def init_db(eng: Optional[AsyncEngine] = None) -> None:
                     active          {_T},
                     created_at      {_TS}
                 )
-            """))
-            await conn.execute(text(f"""
+            """)
+            )
+            await conn.execute(
+                text(f"""
                 CREATE TABLE IF NOT EXISTS alert_send_log (
                     id           {_PK},
                     recipient_id INTEGER,
@@ -555,8 +598,10 @@ async def init_db(eng: Optional[AsyncEngine] = None) -> None:
                     error_msg    TEXT,
                     sent_at      {_TS}
                 )
-            """))
-            await conn.execute(text(f"""
+            """)
+            )
+            await conn.execute(
+                text(f"""
                 CREATE TABLE IF NOT EXISTS zone_alerts (
                     id              {_PK},
                     zone_id         VARCHAR(64),
@@ -569,8 +614,10 @@ async def init_db(eng: Optional[AsyncEngine] = None) -> None:
                     acknowledged_at TIMESTAMP,
                     created_at      {_TS}
                 )
-            """))
-            await conn.execute(text(f"""
+            """)
+            )
+            await conn.execute(
+                text(f"""
                 CREATE TABLE IF NOT EXISTS drift_results (
                     id            {_PK},
                     model_version VARCHAR(64),
@@ -581,8 +628,10 @@ async def init_db(eng: Optional[AsyncEngine] = None) -> None:
                     details       TEXT,
                     recorded_at   {_TS}
                 )
-            """))
-            await conn.execute(text(f"""
+            """)
+            )
+            await conn.execute(
+                text(f"""
                 CREATE TABLE IF NOT EXISTS canary_metrics (
                     id            {_PK},
                     deployment_id INTEGER,
@@ -590,8 +639,10 @@ async def init_db(eng: Optional[AsyncEngine] = None) -> None:
                     metric_value  FLOAT,
                     recorded_at   {_TS}
                 )
-            """))
-            await conn.execute(text(f"""
+            """)
+            )
+            await conn.execute(
+                text(f"""
                 CREATE TABLE IF NOT EXISTS inference_stats_daily (
                     id               {_PK},
                     date             VARCHAR(12),
@@ -601,8 +652,10 @@ async def init_db(eng: Optional[AsyncEngine] = None) -> None:
                     avg_confidence   FLOAT,
                     model_version    VARCHAR(64)
                 )
-            """))
-            await conn.execute(text(f"""
+            """)
+            )
+            await conn.execute(
+                text(f"""
                 CREATE TABLE IF NOT EXISTS worker_audit_log (
                     id        {_PK},
                     worker_id VARCHAR(64),
@@ -611,8 +664,10 @@ async def init_db(eng: Optional[AsyncEngine] = None) -> None:
                     details   TEXT,
                     timestamp {_TS}
                 )
-            """))
-            await conn.execute(text(f"""
+            """)
+            )
+            await conn.execute(
+                text(f"""
                 CREATE TABLE IF NOT EXISTS worker_compliance (
                     id            {_PK},
                     worker_id     VARCHAR(64),
@@ -621,8 +676,10 @@ async def init_db(eng: Optional[AsyncEngine] = None) -> None:
                     total_checks  INTEGER DEFAULT 0,
                     passed_checks INTEGER DEFAULT 0
                 )
-            """))
-            await conn.execute(text(f"""
+            """)
+            )
+            await conn.execute(
+                text(f"""
                 CREATE TABLE IF NOT EXISTS worker_risk_history (
                     id          {_PK},
                     worker_id   VARCHAR(64),
@@ -630,7 +687,8 @@ async def init_db(eng: Optional[AsyncEngine] = None) -> None:
                     risk_level  VARCHAR(16),
                     recorded_at {_TS}
                 )
-            """))
+            """)
+            )
 
         logger.info("Database tables initialised")
     except Exception as exc:
@@ -638,20 +696,19 @@ async def init_db(eng: Optional[AsyncEngine] = None) -> None:
         masked_url = _mask_credentials(DATABASE_URL)
         logger.error("Database initialisation failed — check DATABASE_URL ({})", masked_url)
         raise RuntimeError(
-            f"Database initialisation failed — "
-            f"check DATABASE_URL ({masked_url!r}): {exc}"
+            f"Database initialisation failed — " f"check DATABASE_URL ({masked_url!r}): {exc}"
         ) from exc
 
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
     """
     FastAPI dependency that yields a managed async DB session.
-    
+
     Behaviour:
     - Commits automatically on clean handler exit.
     - Rolls back and re-raises on any exception.
     - Session is always closed after the request completes.
-    
+
     Usage:
         @router.get("/items")
         async def handler(session: AsyncSession = Depends(get_session)):
@@ -673,7 +730,7 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
 async def get_test_session() -> AsyncGenerator[AsyncSession, None]:
     """
     Get a session for testing with an in-memory SQLite DB.
-    
+
     Usage in tests:
         @pytest.fixture
         async def test_session():
@@ -682,10 +739,10 @@ async def get_test_session() -> AsyncGenerator[AsyncSession, None]:
     """
     test_engine = make_engine("sqlite+aiosqlite:///:memory:")
     test_session_factory = make_session_factory(test_engine)
-    
+
     async with test_engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
-    
+
     async with test_session_factory() as session:
         try:
             yield session

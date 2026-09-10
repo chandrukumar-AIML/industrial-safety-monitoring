@@ -17,12 +17,12 @@ import asyncio
 import os
 import uuid
 from collections import defaultdict
-from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 from loguru import logger
 
-from .graph import build_safety_agent, CompiledStateGraph
+from .graph import CompiledStateGraph, build_safety_agent
 from .state import AgentState
 
 # ── Config: Validate at import time ───────────────────────────
@@ -38,24 +38,24 @@ if _DEFAULT_TIMEOUT < 10:
     _DEFAULT_TIMEOUT = 10.0
 
 # ── Task registry for monitoring ─────────────────────────────
-_active_agent_tasks: Dict[str, asyncio.Task] = {}
+_active_agent_tasks: dict[str, asyncio.Task] = {}
 _agent_metrics = defaultdict(int)  # Simple in-mem metrics; replace with Prometheus in prod
 
 
 def _configure_langsmith_once() -> None:
     """
     Configure LangSmith tracing exactly once at startup.
-    
+
     # FIXED: No runtime env mutation — call once during app init
     """
     if not os.getenv("LANGCHAIN_API_KEY"):
         logger.info("LangSmith not configured — tracing disabled")
         return
-    
+
     # Only set if not already set (avoid race conditions)
     os.environ.setdefault("LANGCHAIN_TRACING_V2", "true")
     os.environ.setdefault("LANGCHAIN_PROJECT", "safety-monitor-agent")
-    
+
     logger.info("LangSmith tracing enabled | project={}", os.getenv("LANGCHAIN_PROJECT"))
 
 
@@ -64,15 +64,15 @@ _configure_langsmith_once()
 
 
 async def run_agent(
-    violation_event: Dict[str, Any],
+    violation_event: dict[str, Any],
     timeout_s: float = _DEFAULT_TIMEOUT,
-    db_factory: Optional[Any] = None,
-    llm_client: Optional[Any] = None,
+    db_factory: Any | None = None,
+    llm_client: Any | None = None,
     redact_pii: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Run the safety agent for one violation event.
-    
+
     # IMPROVED: Accept injected dependencies for testability
     # FIXED: Use timezone-aware datetime in logs
     """
@@ -86,9 +86,9 @@ async def run_agent(
         "alert_sent": False,
         "final_status": "RUNNING",
         "error": None,
-        "db_factory": db_factory,      # Injected for testing
-        "llm_client": llm_client,      # Injected for testing
-        "redact_pii": redact_pii,      # PII redaction toggle
+        "db_factory": db_factory,  # Injected for testing
+        "llm_client": llm_client,  # Injected for testing
+        "redact_pii": redact_pii,  # PII redaction toggle
     }
 
     logger.info(
@@ -99,10 +99,14 @@ async def run_agent(
     )
 
     # Build graph with injected deps if provided
-    graph: CompiledStateGraph = build_safety_agent(
-        db_factory=db_factory,
-        llm_client=llm_client,
-    ) if (db_factory or llm_client) else build_safety_agent()
+    graph: CompiledStateGraph = (
+        build_safety_agent(
+            db_factory=db_factory,
+            llm_client=llm_client,
+        )
+        if (db_factory or llm_client)
+        else build_safety_agent()
+    )
 
     async with asyncio.Semaphore(_MAX_CONCURRENT):
         try:
@@ -132,7 +136,7 @@ async def run_agent(
             _agent_metrics["runs_completed"] += 1
             return final_state
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.error("Agent run timed out | id={} | timeout={}s", run_id, timeout_s)
             _agent_metrics["runs_timed_out"] += 1
             return {
@@ -151,7 +155,7 @@ async def run_agent(
 
 
 # ── Task registry helpers ─────────────────────────────────────
-def get_active_agent_tasks() -> Dict[str, Dict]:
+def get_active_agent_tasks() -> dict[str, dict]:
     """Return snapshot of active tasks for monitoring endpoint."""
     return {
         name: {
@@ -162,7 +166,7 @@ def get_active_agent_tasks() -> Dict[str, Dict]:
     }
 
 
-def get_agent_metrics() -> Dict:
+def get_agent_metrics() -> dict:
     """Return simple metrics for dashboard."""
     total = _agent_metrics["runs_started"]
     return {
@@ -170,7 +174,9 @@ def get_agent_metrics() -> Dict:
         "completed": _agent_metrics["runs_completed"],
         "timed_out": _agent_metrics["runs_timed_out"],
         "failed": _agent_metrics["runs_failed"],
-        "success_rate": round(_agent_metrics["runs_completed"] / total * 100, 1) if total > 0 else 0,
+        "success_rate": round(_agent_metrics["runs_completed"] / total * 100, 1)
+        if total > 0
+        else 0,
     }
 
 
@@ -178,14 +184,14 @@ async def trigger_from_violation(
     track_id: int,
     class_name: str,
     confidence: float,
-    zone_id: Optional[str],
+    zone_id: str | None,
     frame_idx: int,
-    timestamp: Optional[str] = None,
+    timestamp: str | None = None,
     **kwargs,  # Allow passing injected deps
 ) -> asyncio.Task:
     """
     Convenience function — build event dict and fire agent.
-    
+
     # FIXED: Return the Task so caller can track/cancel if needed
     # IMPROVED: Accept injected dependencies for testing
     """
@@ -195,21 +201,23 @@ async def trigger_from_violation(
         "confidence": confidence,
         "zone_id": zone_id,
         "frame_idx": frame_idx,
-        "timestamp": timestamp or datetime.now(timezone.utc).isoformat(),
+        "timestamp": timestamp or datetime.now(UTC).isoformat(),
     }
-    
+
     task = asyncio.create_task(
         run_agent(event, **kwargs),
         name=f"agent_{track_id}_{class_name}",
     )
-    
+
     # Register for monitoring + auto-cleanup
     _active_agent_tasks[task.get_name()] = task
     task.add_done_callback(lambda t: _active_agent_tasks.pop(t.get_name(), None))
-    
+
     logger.debug(
         "Agent triggered (background) | track={} | class={} | task={}",
-        track_id, class_name, task.get_name(),
+        track_id,
+        class_name,
+        task.get_name(),
     )
-    
+
     return task  # Return task for optional awaiting/tracking

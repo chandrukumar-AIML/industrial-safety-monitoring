@@ -19,14 +19,17 @@ import os
 import re
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Optional, Dict, Any, Protocol, runtime_checkable
+from datetime import UTC, datetime
+from typing import Any, Protocol, runtime_checkable
 
 from loguru import logger
 from pydantic import BaseModel, Field, field_validator  # FIXED: Pydantic v2 compatibility
 
+
 # ── Config: Load from env with validation ─────────────────────
-def _validate_float_range(name: str, value: str, default: float, min_val: float, max_val: float) -> float:
+def _validate_float_range(
+    name: str, value: str, default: float, min_val: float, max_val: float
+) -> float:
     try:
         val = float(value)
         if not min_val <= val <= max_val:
@@ -36,6 +39,7 @@ def _validate_float_range(name: str, value: str, default: float, min_val: float,
         logger.warning("{} invalid: {} — using default {}", name, value, default)
         return default
 
+
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 if not OLLAMA_BASE_URL.startswith(("http://", "https://")):
     logger.warning("OLLAMA_BASE_URL may be invalid — using default")
@@ -43,7 +47,9 @@ if not OLLAMA_BASE_URL.startswith(("http://", "https://")):
 
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-REPORT_LLM_PRIMARY = os.getenv("REPORT_LLM_PRIMARY", "llm_manager")  # ← uses LLMManager (Groq→OR→Ollama→template)
+REPORT_LLM_PRIMARY = os.getenv(
+    "REPORT_LLM_PRIMARY", "llm_manager"
+)  # ← uses LLMManager (Groq→OR→Ollama→template)
 REPORT_LLM_FALLBACK = os.getenv("REPORT_LLM_FALLBACK", "openai")
 
 # Enterprise LLM Manager (Groq → OpenRouter → OpenAI → Ollama → Template)
@@ -69,22 +75,25 @@ _OSHA_MAP = {
     "no suit": "29 CFR 1910.132 — General PPE Requirements",
 }
 
+
 # ── Protocol for dependency injection ─────────────────────────
 @runtime_checkable
 class LLMClientProtocol(Protocol):
     """Protocol for LLM client — enables mocking in tests."""
+
     async def ainvoke(self, prompt: str) -> str: ...
 
 
 # ── Pydantic models for structured validation ─────────────────
 class GeneratorConfig(BaseModel):
     """Validated configuration for report generator."""
+
     ollama_base_url: str = Field(default=OLLAMA_BASE_URL)
     ollama_model: str = Field(default=OLLAMA_MODEL)
     openai_api_key: str = Field(default=OPENAI_API_KEY)
     primary_llm: str = Field(default=REPORT_LLM_PRIMARY)
     fallback_llm: str = Field(default=REPORT_LLM_FALLBACK)
-    
+
     @field_validator("primary_llm", "fallback_llm")
     @classmethod
     def validate_llm_backend(cls, v):
@@ -104,6 +113,7 @@ class GeneratorConfig(BaseModel):
 @dataclass
 class GeneratedReport:
     """Parsed LLM report output."""
+
     incident_summary: str
     root_cause_analysis: str
     corrective_actions: str
@@ -112,8 +122,8 @@ class GeneratedReport:
     model_used: str
     generation_ms: int
     raw_output: str = field(repr=False)
-    generated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-    
+    generated_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
+
     def __post_init__(self):
         # Validate fields
         if not self.incident_summary or len(self.incident_summary) < 10:
@@ -122,8 +132,8 @@ class GeneratedReport:
             logger.warning("osha_reference too short: {} chars", len(self.osha_reference))
         if self.severity_level not in ("CRITICAL", "HIGH", "MEDIUM", "LOW"):
             logger.warning("Invalid severity_level: {}", self.severity_level)
-    
-    def to_dict(self) -> Dict[str, Any]:
+
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dict for JSON serialization."""
         return {
             "incident_summary": self.incident_summary,
@@ -140,10 +150,13 @@ class GeneratedReport:
 # ── Custom exceptions ────────────────────────────────────────
 class ReportsError(Exception):
     """Base exception for report operations."""
+
     pass
+
 
 class ReportGenerationError(ReportsError):
     """Raised when report generation fails."""
+
     pass
 
 
@@ -162,11 +175,11 @@ def _get_severity(class_name: str, prior_count: int) -> str:
 
 
 # ── Helper: Parse structured LLM output ──────────────────────
-def _parse_report(raw: str) -> Dict[str, str]:
+def _parse_report(raw: str) -> dict[str, str]:
     """
     Parse the structured LLM output into sections.
     Robust to slight formatting variations from different models.
-    
+
     # IMPROVED: Better regex patterns with fallbacks
     """
     sections = {
@@ -189,7 +202,7 @@ def _parse_report(raw: str) -> Dict[str, str]:
         if match:
             content = match.group(1).strip()
             # Clean up extra whitespace
-            sections[key] = re.sub(r'\s+', ' ', content)
+            sections[key] = re.sub(r"\s+", " ", content)
 
     # Fallback: if parsing completely failed, put everything in summary
     if not any(sections.values()):
@@ -200,15 +213,16 @@ def _parse_report(raw: str) -> Dict[str, str]:
 
 
 # ── Helper: Build LLM chain ──────────────────────────────────
-def _build_llm_chain(use_openai: bool = False, config: Optional[GeneratorConfig] = None):
+def _build_llm_chain(use_openai: bool = False, config: GeneratorConfig | None = None):
     """Build the LangChain chain for the appropriate LLM."""
     cfg = config or GeneratorConfig()
-    
+
     if use_openai:
         from langchain_openai import ChatOpenAI
+
         if not cfg.openai_api_key:
             raise ReportGenerationError("OPENAI_API_KEY required for OpenAI backend")
-        
+
         llm = ChatOpenAI(
             model="gpt-4o",
             temperature=0.2,
@@ -218,6 +232,7 @@ def _build_llm_chain(use_openai: bool = False, config: Optional[GeneratorConfig]
         )
     else:
         from langchain_ollama import OllamaLLM
+
         llm = OllamaLLM(
             base_url=cfg.ollama_base_url,
             model=cfg.ollama_model,
@@ -227,9 +242,10 @@ def _build_llm_chain(use_openai: bool = False, config: Optional[GeneratorConfig]
         )
 
     # Import prompt template
-    from .templates.report_prompt import REPORT_PROMPT
     from langchain_core.output_parsers import StrOutputParser
-    
+
+    from .templates.report_prompt import REPORT_PROMPT
+
     return REPORT_PROMPT | llm | StrOutputParser()
 
 
@@ -243,16 +259,16 @@ async def generate_report(
     frame_idx: int,
     prior_violations_count: int = 0,
     zone_description: str = "general worksite area",
-    config: Optional[GeneratorConfig] = None,
+    config: GeneratorConfig | None = None,
 ) -> GeneratedReport:
     """
     Generate a full incident report using LLM.
-    
+
     # FIXED: Input validation + sanitization
     # IMPROVED: Proper error handling with retry logic
     # IMPROVED: Dependency injection for testability
     # FIXED: No PII leakage in logs
-    
+
     Tries Ollama first, falls back to GPT-4o if configured and Ollama fails.
 
     Args:
@@ -274,7 +290,7 @@ async def generate_report(
         ValueError: If inputs are invalid.
     """
     cfg = config or GeneratorConfig()
-    
+
     # Validate inputs
     if track_id < 0:
         raise ValueError(f"track_id cannot be negative: {track_id}")
@@ -292,7 +308,7 @@ async def generate_report(
         raise ValueError(f"prior_violations_count cannot be negative: {prior_violations_count}")
     if len(zone_description) > 500:
         zone_description = zone_description[:500] + "..."  # Truncate for safety
-    
+
     severity = _get_severity(class_name, prior_violations_count)
 
     prompt_inputs = {
@@ -312,7 +328,8 @@ async def generate_report(
         try:
             logger.info(
                 "Generating report via LLMManager | track={} | class={}",
-                track_id, class_name,
+                track_id,
+                class_name,
             )
             t0 = time.monotonic()
 
@@ -332,7 +349,9 @@ async def generate_report(
 
             logger.info(
                 "Report generated via LLMManager | model={} | ms={} | severity={}",
-                active_model, ms, severity,
+                active_model,
+                ms,
+                severity,
             )
             return GeneratedReport(
                 incident_summary=sections["incident_summary"],
@@ -345,7 +364,10 @@ async def generate_report(
                 raw_output=sections.get("narrative", ""),
             )
         except Exception as exc:
-            logger.warning("LLMManager report generation failed: {} — falling back to LangChain", type(exc).__name__)
+            logger.warning(
+                "LLMManager report generation failed: {} — falling back to LangChain",
+                type(exc).__name__,
+            )
             # Fall through to LangChain backends below
 
     # ── Legacy LangChain path (ollama / openai) ────────────────
@@ -361,15 +383,16 @@ async def generate_report(
 
     if not backends:
         raise ReportGenerationError(
-            "No LLM backend configured. "
-            "Set GROQ_API_KEY, OLLAMA_BASE_URL, or OPENAI_API_KEY."
+            "No LLM backend configured. " "Set GROQ_API_KEY, OLLAMA_BASE_URL, or OPENAI_API_KEY."
         )
 
     for model_name, use_openai in backends:
         try:
             logger.info(
                 "Generating report | model={} | track={} | class={}",
-                model_name, track_id, class_name,
+                model_name,
+                track_id,
+                class_name,
             )
             t0 = time.monotonic()
             chain = _build_llm_chain(use_openai=use_openai, config=cfg)
@@ -381,13 +404,14 @@ async def generate_report(
             # Use known OSHA reference if LLM didn't provide a good one
             if not sections["osha_reference"] or len(sections["osha_reference"]) < 20:
                 sections["osha_reference"] = _OSHA_MAP.get(
-                    class_name.lower(),
-                    "29 CFR 1910.132 — General PPE Requirements"
+                    class_name.lower(), "29 CFR 1910.132 — General PPE Requirements"
                 )
 
             logger.info(
                 "Report generated | model={} | ms={} | severity={}",
-                model_name, ms, severity,
+                model_name,
+                ms,
+                severity,
             )
 
             return GeneratedReport(
@@ -405,13 +429,12 @@ async def generate_report(
             last_error = exc
             logger.warning(
                 "LLM backend '{}' failed: {} — trying next",
-                model_name, type(exc).__name__,
+                model_name,
+                type(exc).__name__,
             )
             # Don't log full exception to avoid leaking sensitive data
 
-    raise ReportGenerationError(
-        f"All LLM backends failed. Last error: {type(last_error).__name__}"
-    )
+    raise ReportGenerationError(f"All LLM backends failed. Last error: {type(last_error).__name__}")
 
 
 def get_diagnostics() -> dict:

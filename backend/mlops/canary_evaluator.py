@@ -25,19 +25,21 @@ Otherwise → recommend EXTEND (collect more frames)
 
 from __future__ import annotations
 
-import os
-import re
 import math
+import os
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from enum import Enum, auto
-from typing import Optional, Dict, Any, Protocol, runtime_checkable
+from datetime import UTC, datetime
+from enum import Enum
+from typing import Any, Protocol, runtime_checkable
 
 from loguru import logger
 from pydantic import BaseModel, Field, model_validator  # FIXED: Pydantic v2 compatibility
 
+
 # ── Config: Load from env with validation ─────────────────────
-def _validate_float_range(name: str, value: str, default: float, min_val: float, max_val: float) -> float:
+def _validate_float_range(
+    name: str, value: str, default: float, min_val: float, max_val: float
+) -> float:
     try:
         val = float(value)
         if not min_val <= val <= max_val:
@@ -47,9 +49,24 @@ def _validate_float_range(name: str, value: str, default: float, min_val: float,
         logger.warning("{} invalid: {} — using default {}", name, value, default)
         return default
 
-CONFIDENCE_GAIN = _validate_float_range("CANARY_CONFIDENCE_GAIN_THRESHOLD", os.getenv("CANARY_CONFIDENCE_GAIN_THRESHOLD", "0.02"), 0.02, 0.0, 1.0)
-MAX_LATENCY_RATIO = _validate_float_range("CANARY_MAX_LATENCY_RATIO", os.getenv("CANARY_MAX_LATENCY_RATIO", "1.20"), 1.20, 1.0, 2.0)
-ROLLBACK_CONFIDENCE_DROP = _validate_float_range("CANARY_ROLLBACK_CONFIDENCE_DROP", os.getenv("CANARY_ROLLBACK_CONFIDENCE_DROP", "0.05"), 0.05, 0.0, 1.0)
+
+CONFIDENCE_GAIN = _validate_float_range(
+    "CANARY_CONFIDENCE_GAIN_THRESHOLD",
+    os.getenv("CANARY_CONFIDENCE_GAIN_THRESHOLD", "0.02"),
+    0.02,
+    0.0,
+    1.0,
+)
+MAX_LATENCY_RATIO = _validate_float_range(
+    "CANARY_MAX_LATENCY_RATIO", os.getenv("CANARY_MAX_LATENCY_RATIO", "1.20"), 1.20, 1.0, 2.0
+)
+ROLLBACK_CONFIDENCE_DROP = _validate_float_range(
+    "CANARY_ROLLBACK_CONFIDENCE_DROP",
+    os.getenv("CANARY_ROLLBACK_CONFIDENCE_DROP", "0.05"),
+    0.05,
+    0.0,
+    1.0,
+)
 CANARY_MIN_FRAMES = int(os.getenv("CANARY_MIN_FRAMES", "1000"))
 if CANARY_MIN_FRAMES < 100:
     logger.warning("CANARY_MIN_FRAMES too small — using 1000")
@@ -73,15 +90,16 @@ class EvaluationVerdict(str, Enum):
 # ── Pydantic models for structured validation ─────────────────
 class EvaluationConfig(BaseModel):
     """Validated configuration for canary evaluation."""
+
     confidence_gain_threshold: float = Field(default=CONFIDENCE_GAIN, ge=0, le=1)
     max_latency_ratio: float = Field(default=MAX_LATENCY_RATIO, ge=1, le=2)
     rollback_confidence_drop: float = Field(default=ROLLBACK_CONFIDENCE_DROP, ge=0, le=1)
     min_frames: int = Field(default=CANARY_MIN_FRAMES, ge=100)
     enable_statistical_test: bool = Field(default=ENABLE_STATISTICAL_TEST)
     significance_level: float = Field(default=SIGNIFICANCE_LEVEL, gt=0, lt=1)
-    
+
     @model_validator(mode="after")
-    def validate_thresholds(self) -> "EvaluationConfig":
+    def validate_thresholds(self) -> EvaluationConfig:
         if self.rollback_confidence_drop <= self.confidence_gain_threshold:
             logger.warning("rollback_confidence_drop should be > confidence_gain_threshold")
         return self
@@ -90,6 +108,7 @@ class EvaluationConfig(BaseModel):
 @dataclass
 class EvaluationResult:
     """Complete canary evaluation result."""
+
     verdict: EvaluationVerdict
     canary_frames: int
     prod_frames: int
@@ -101,17 +120,17 @@ class EvaluationResult:
     latency_ratio: float
     reason: str
     auto_action_taken: bool
-    p_value: Optional[float] = None  # Statistical significance
-    evaluated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-    
+    p_value: float | None = None  # Statistical significance
+    evaluated_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
+
     def __post_init__(self):
         # Validate fields
         if self.confidence_delta < -1 or self.confidence_delta > 1:
             logger.warning("confidence_delta out of [-1, 1]: {}", self.confidence_delta)
         if self.latency_ratio < 0:
             logger.warning("latency_ratio cannot be negative: {}", self.latency_ratio)
-    
-    def to_dict(self) -> Dict[str, Any]:
+
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dict for JSON serialization."""
         return {
             "verdict": self.verdict.value,
@@ -134,16 +153,20 @@ class EvaluationResult:
 @runtime_checkable
 class DBFactoryProtocol(Protocol):
     """Protocol for async session factory — enables mocking in tests."""
+
     def __call__(self): ...
 
 
 # ── Custom exceptions ────────────────────────────────────────
 class MLOpsError(Exception):
     """Base exception for MLOps operations."""
+
     pass
+
 
 class CanaryEvaluationError(MLOpsError):
     """Raised when canary evaluation fails."""
+
     pass
 
 
@@ -155,29 +178,30 @@ def _compute_p_value(
     prod_std: float,
     canary_n: int,
     prod_n: int,
-) -> Optional[float]:
+) -> float | None:
     """
     Compute two-sample t-test p-value for confidence difference.
     Returns None if insufficient data.
-    
+
     # IMPROVED: Statistical significance testing for confidence delta
     """
     if canary_n < 30 or prod_n < 30:
         return None  # Insufficient data for t-test
-    
+
     # Pooled standard error
     se = math.sqrt((canary_std**2 / canary_n) + (prod_std**2 / prod_n))
     if se < 1e-10:
         return None
-    
+
     # T-statistic
     t_stat = (canary_conf - prod_conf) / se
-    
+
     # Approximate p-value using normal distribution (large n)
     # For production, use scipy.stats.t.cdf for exact t-distribution
     from math import erf, sqrt
+
     p_value = 1 - erf(abs(t_stat) / sqrt(2))
-    
+
     return round(p_value, 4)
 
 
@@ -185,34 +209,34 @@ def _compute_p_value(
 async def evaluate_canary(
     deployment_id: int,
     db_factory: DBFactoryProtocol,
-    config: Optional[EvaluationConfig] = None,
+    config: EvaluationConfig | None = None,
 ) -> EvaluationResult:
     """
     Pull canary vs production metrics from DB and evaluate.
-    
+
     # FIXED: Parameterized queries only — no SQL injection
     # FIXED: Input validation + sanitization
     # IMPROVED: Statistical significance testing for confidence delta
-    
+
     Args:
         deployment_id: ID in model_deployments table.
         db_factory: AsyncSessionLocal factory.
         config: Optional override config.
-        
+
     Returns:
         EvaluationResult with verdict and supporting metrics.
-        
+
     Raises:
         CanaryEvaluationError: If evaluation fails.
     """
     cfg = config or EvaluationConfig()
-    
+
     # Validate deployment_id
     if not isinstance(deployment_id, int) or deployment_id < 1:
         raise CanaryEvaluationError(f"Invalid deployment_id: {deployment_id}")
-    
-    from sqlalchemy import text, func
-    
+
+    from sqlalchemy import text
+
     async with db_factory() as session:
         # Use parameterized query with aggregation
         result = await session.execute(
@@ -228,13 +252,13 @@ async def evaluate_canary(
                 WHERE deployment_id = :dep_id
                 GROUP BY model_type
             """),
-            {"dep_id": deployment_id}
+            {"dep_id": deployment_id},
         )
         rows = {r[0]: r for r in result.all()}
-    
+
     canary_row = rows.get("canary")
     prod_row = rows.get("production")
-    
+
     if not canary_row or not prod_row:
         return EvaluationResult(
             verdict=EvaluationVerdict.EXTEND,
@@ -249,53 +273,56 @@ async def evaluate_canary(
             reason="Insufficient metrics data",
             auto_action_taken=False,
         )
-    
+
     # Extract and validate metrics
     canary_frames = int(canary_row[1] or 0)
     canary_conf = float(canary_row[2] or 0)
     canary_conf_std = float(canary_row[3] or 0)
     canary_latency = float(canary_row[4] or 0)
-    
+
     prod_frames = int(prod_row[1] or 0)
     prod_conf = float(prod_row[2] or 0)
     prod_conf_std = float(prod_row[3] or 0)
     prod_latency = float(prod_row[4] or 0)
-    
+
     # Validate ranges
     for name, val in [("canary_conf", canary_conf), ("prod_conf", prod_conf)]:
         if not 0 <= val <= 1:
             logger.warning("{} out of [0, 1]: {}", name, val)
-    
+
     conf_delta = canary_conf - prod_conf
     latency_ratio = canary_latency / prod_latency if prod_latency > 0 else 1.0
-    
+
     # Statistical significance test
     p_value = None
     if cfg.enable_statistical_test:
         p_value = _compute_p_value(
-            canary_conf, prod_conf,
-            canary_conf_std, prod_conf_std,
-            canary_frames, prod_frames,
+            canary_conf,
+            prod_conf,
+            canary_conf_std,
+            prod_conf_std,
+            canary_frames,
+            prod_frames,
         )
-    
+
     logger.info(
-        "Canary eval | frames={}/{} | conf_delta={:+.4f} | "
-        "latency_ratio={:.2f} | p_value={}",
-        canary_frames, prod_frames, conf_delta, latency_ratio,
+        "Canary eval | frames={}/{} | conf_delta={:+.4f} | " "latency_ratio={:.2f} | p_value={}",
+        canary_frames,
+        prod_frames,
+        conf_delta,
+        latency_ratio,
         p_value if p_value is not None else "N/A",
     )
-    
+
     # ── Evaluation logic ──────────────────────────────────────
     auto_promote = os.getenv("AUTO_PROMOTE_CANARY", "false").lower() == "true"
-    
+    _ = auto_promote  # used later if auto-action logic is wired
+
     # 1. Minimum frames check
     if canary_frames < cfg.min_frames:
         verdict = EvaluationVerdict.EXTEND
-        reason = (
-            f"Insufficient canary frames: {canary_frames} "
-            f"< {cfg.min_frames}"
-        )
-    
+        reason = f"Insufficient canary frames: {canary_frames} " f"< {cfg.min_frames}"
+
     # 2. Confidence drop check (rollback)
     elif conf_delta < -cfg.rollback_confidence_drop:
         verdict = EvaluationVerdict.ROLLBACK
@@ -304,7 +331,7 @@ async def evaluate_canary(
             f"{canary_conf:.4f} vs {prod_conf:.4f} "
             f"(Δ={conf_delta:+.4f})"
         )
-    
+
     # 3. Latency check (rollback)
     elif latency_ratio > cfg.max_latency_ratio:
         verdict = EvaluationVerdict.ROLLBACK
@@ -312,7 +339,7 @@ async def evaluate_canary(
             f"Canary too slow: {canary_latency:.1f}ms vs "
             f"{prod_latency:.1f}ms (ratio={latency_ratio:.2f})"
         )
-    
+
     # 4. Statistical significance + confidence gain (promote)
     elif cfg.enable_statistical_test and p_value is not None:
         if p_value < cfg.significance_level and conf_delta >= cfg.confidence_gain_threshold:
@@ -335,7 +362,7 @@ async def evaluate_canary(
                 f"Canary confidence similar: Δ={conf_delta:+.4f}, p={p_value:.4f} "
                 f"(threshold={cfg.confidence_gain_threshold})"
             )
-    
+
     # 5. Simple confidence gain check (promote)
     elif conf_delta >= cfg.confidence_gain_threshold:
         verdict = EvaluationVerdict.PROMOTE
@@ -344,7 +371,7 @@ async def evaluate_canary(
             f"{canary_conf:.4f} vs {prod_conf:.4f} "
             f"(Δ={conf_delta:+.4f} >= threshold={cfg.confidence_gain_threshold})"
         )
-    
+
     # 6. Default: extend
     else:
         verdict = EvaluationVerdict.EXTEND
@@ -352,9 +379,9 @@ async def evaluate_canary(
             f"Canary confidence similar: Δ={conf_delta:+.4f} "
             f"(threshold={cfg.confidence_gain_threshold}). Collecting more frames."
         )
-    
+
     logger.info("Canary verdict: {} | {}", verdict.value, reason)
-    
+
     return EvaluationResult(
         verdict=verdict,
         canary_frames=canary_frames,
@@ -385,11 +412,11 @@ async def record_canary_metric(
     """
     Record one frame's inference metrics for A/B comparison.
     Sampled to avoid table bloat.
-    
+
     # FIXED: Parameterized queries only — no SQL injection
     # FIXED: Input validation + sanitization
     # IMPROVED: Configurable sample rate
-    
+
     Args:
         deployment_id: ID in model_deployments table.
         model_type: "canary" or "production".
@@ -411,12 +438,13 @@ async def record_canary_metric(
     if not 0 <= sample_rate <= 1:
         logger.warning("sample_rate out of [0, 1]: {} — using 0.10", sample_rate)
         sample_rate = 0.10
-    
+
     # Sample decision
     import random
+
     if random.random() > sample_rate:
         return
-    
+
     # Validate metric ranges
     if not 0 <= confidence_mean <= 1:
         logger.warning("confidence_mean out of [0, 1]: {}", confidence_mean)
@@ -424,9 +452,9 @@ async def record_canary_metric(
     if inference_ms < 0:
         logger.warning("inference_ms cannot be negative: {}", inference_ms)
         inference_ms = abs(inference_ms)
-    
+
     from sqlalchemy import text
-    
+
     async with db_factory() as session:
         try:
             await session.execute(
@@ -448,7 +476,7 @@ async def record_canary_metric(
                     "viol_count": violation_count,
                     "conf_mean": confidence_mean,
                     "inf_ms": inference_ms,
-                }
+                },
             )
             await session.commit()
         except Exception as exc:

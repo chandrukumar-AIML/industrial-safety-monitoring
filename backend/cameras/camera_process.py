@@ -21,49 +21,54 @@ import os
 import queue
 import time
 from dataclasses import dataclass, field
-from typing      import Optional
+from typing import TYPE_CHECKING
 
-_RECONNECT_BASE   = float(os.getenv("CAMERA_RECONNECT_BASE_DELAY_S", "2.0"))
-_RECONNECT_MAX    = float(os.getenv("CAMERA_RECONNECT_MAX_DELAY_S",  "60.0"))
-_MAX_ATTEMPTS     = int  (os.getenv("CAMERA_RECONNECT_MAX_ATTEMPTS", "5"))
-_QUEUE_SIZE       = int  (os.getenv("CAMERA_FRAME_QUEUE_SIZE",       "8"))
+if TYPE_CHECKING:
+    import numpy as np
+
+_RECONNECT_BASE = float(os.getenv("CAMERA_RECONNECT_BASE_DELAY_S", "2.0"))
+_RECONNECT_MAX = float(os.getenv("CAMERA_RECONNECT_MAX_DELAY_S", "60.0"))
+_MAX_ATTEMPTS = int(os.getenv("CAMERA_RECONNECT_MAX_ATTEMPTS", "5"))
+_QUEUE_SIZE = int(os.getenv("CAMERA_FRAME_QUEUE_SIZE", "8"))
 
 
 @dataclass
 class CameraHealthEvent:
     """Status event from camera process to manager."""
-    camera_id     : str
-    event_type    : str    # connected | disconnected | error | frame
-    fps           : float  = 0.0
-    error_msg     : str    = ""
-    timestamp     : float  = field(default_factory=time.time)
+
+    camera_id: str
+    event_type: str  # connected | disconnected | error | frame
+    fps: float = 0.0
+    error_msg: str = ""
+    timestamp: float = field(default_factory=time.time)
 
 
 @dataclass
 class CameraFrameResult:
     """Lightweight frame result from camera process."""
-    camera_id        : str
-    frame_idx        : int
-    timestamp        : float
-    jpeg_bytes       : bytes          # JPEG-encoded annotated frame
-    violation_count  : int
-    detection_count  : int
-    active_tracks    : int
-    fps              : float
-    violations       : list           # serialisable violation dicts
+
+    camera_id: str
+    frame_idx: int
+    timestamp: float
+    jpeg_bytes: bytes  # JPEG-encoded annotated frame
+    violation_count: int
+    detection_count: int
+    active_tracks: int
+    fps: float
+    violations: list  # serialisable violation dicts
 
 
 def _camera_worker(
-    camera_id    : str,
-    camera_name  : str,
-    rtsp_url     : str,
-    zone_id      : Optional[str],
-    model_path   : str,
-    device       : str,
-    frame_queue  : mp.Queue,
-    health_queue : mp.Queue,
-    stop_event   : mp.Event,
-    frame_skip   : int = 2,
+    camera_id: str,
+    camera_name: str,
+    rtsp_url: str,
+    zone_id: str | None,
+    model_path: str,
+    device: str,
+    frame_queue: mp.Queue,
+    health_queue: mp.Queue,
+    stop_event: mp.Event,
+    frame_skip: int = 2,
 ) -> None:
     """
     Main camera worker function — runs in child process.
@@ -79,35 +84,36 @@ def _camera_worker(
     """
     # Import inside worker process (each process gets own memory space)
     import cv2
-    import numpy as np
     from loguru import logger
 
     logger.info("Camera process started | id={} | url={}", camera_id, rtsp_url)
 
     def _put_health(event_type: str, fps: float = 0.0, error: str = "") -> None:
         try:
-            health_queue.put_nowait(CameraHealthEvent(
-                camera_id  = camera_id,
-                event_type = event_type,
-                fps        = fps,
-                error_msg  = error,
-            ))
+            health_queue.put_nowait(
+                CameraHealthEvent(
+                    camera_id=camera_id,
+                    event_type=event_type,
+                    fps=fps,
+                    error_msg=error,
+                )
+            )
         except Exception:
             pass
 
     # Load detector inside process (separate from main process)
     try:
         from inference.detector import PPEDetector
-        from inference.tracker  import ByteTracker
+        from inference.tracker import ByteTracker
 
         detector = PPEDetector(
-            model_path     = model_path,
-            device         = device,
-            conf_threshold = float(os.getenv("CONFIDENCE_THRESHOLD", "0.35")),
-            iou_threshold  = float(os.getenv("IOU_THRESHOLD",        "0.45")),
+            model_path=model_path,
+            device=device,
+            conf_threshold=float(os.getenv("CONFIDENCE_THRESHOLD", "0.35")),
+            iou_threshold=float(os.getenv("IOU_THRESHOLD", "0.45")),
         )
         class_names = detector.class_names
-        tracker     = ByteTracker(class_names=class_names)
+        tracker = ByteTracker(class_names=class_names)
 
     except Exception as exc:
         _put_health("error", error=f"Model load failed: {exc}")
@@ -115,7 +121,7 @@ def _camera_worker(
         return
 
     reconnect_attempts = 0
-    reconnect_delay    = _RECONNECT_BASE
+    reconnect_delay = _RECONNECT_BASE
 
     while not stop_event.is_set():
         cap = None
@@ -129,15 +135,15 @@ def _camera_worker(
                 raise ConnectionError(f"Cannot open: {rtsp_url}")
 
             reconnect_attempts = 0
-            reconnect_delay    = _RECONNECT_BASE
+            reconnect_delay = _RECONNECT_BASE
             _put_health("connected", fps=0.0)
             logger.info("Camera {}: connected", camera_id)
 
-            frame_idx   = 0
-            fps_times   : list = []
+            frame_idx = 0
+            fps_times: list = []
             stats_frames = 0
-            stats_viols  = 0
-            stats_dets   = 0
+            stats_viols = 0
+            stats_dets = 0
             last_stats_t = time.monotonic()
 
             while not stop_event.is_set():
@@ -154,13 +160,13 @@ def _camera_worker(
                 # ── Inference ─────────────────────────────────
                 try:
                     yolo_result = detector.predict(frame)
-                    h, w        = frame.shape[:2]
-                    tracked     = tracker.update(
+                    h, w = frame.shape[:2]
+                    tracked = tracker.update(
                         yolo_result,
-                        frame_idx = frame_idx,
-                        frame_wh  = (w, h),
+                        frame_idx=frame_idx,
+                        frame_wh=(w, h),
                     )
-                    violations  = [d for d in tracked if d.is_violation]
+                    violations = [d for d in tracked if d.is_violation]
 
                 except Exception as exc:
                     logger.warning("Camera {}: inference error: {}", camera_id, exc)
@@ -178,28 +184,29 @@ def _camera_worker(
 
                 # ── JPEG encode ───────────────────────────────
                 _, jpeg_buf = cv2.imencode(
-                    ".jpg", annotated,
+                    ".jpg",
+                    annotated,
                     [cv2.IMWRITE_JPEG_QUALITY, 75],
                 )
                 jpeg_bytes = jpeg_buf.tobytes()
 
                 # ── Build result ──────────────────────────────
                 result = CameraFrameResult(
-                    camera_id       = camera_id,
-                    frame_idx       = frame_idx,
-                    timestamp       = time.time(),
-                    jpeg_bytes      = jpeg_bytes,
-                    violation_count = len(violations),
-                    detection_count = len(tracked),
-                    active_tracks   = len(tracked),
-                    fps             = round(fps, 1),
-                    violations      = [
+                    camera_id=camera_id,
+                    frame_idx=frame_idx,
+                    timestamp=time.time(),
+                    jpeg_bytes=jpeg_bytes,
+                    violation_count=len(violations),
+                    detection_count=len(tracked),
+                    active_tracks=len(tracked),
+                    fps=round(fps, 1),
+                    violations=[
                         {
-                            "track_id"  : d.track_id,
+                            "track_id": d.track_id,
                             "class_name": d.class_name,
                             "confidence": d.confidence,
-                            "zone_id"   : d.zone_id,
-                            "bbox_xyxy" : d.bbox_xyxy,
+                            "zone_id": d.zone_id,
+                            "bbox_xyxy": d.bbox_xyxy,
                         }
                         for d in violations
                     ],
@@ -217,8 +224,8 @@ def _camera_worker(
 
                 # ── Accumulate stats ──────────────────────────
                 stats_frames += 1
-                stats_dets   += len(tracked)
-                stats_viols  += len(violations)
+                stats_dets += len(tracked)
+                stats_viols += len(violations)
 
                 # Health heartbeat every 5 seconds
                 now = time.monotonic()
@@ -232,14 +239,18 @@ def _camera_worker(
             _put_health("disconnected", error=error_msg)
             logger.warning(
                 "Camera {}: disconnected (attempt {}/{}) — {}",
-                camera_id, reconnect_attempts, _MAX_ATTEMPTS, error_msg,
+                camera_id,
+                reconnect_attempts,
+                _MAX_ATTEMPTS,
+                error_msg,
             )
 
             if reconnect_attempts >= _MAX_ATTEMPTS:
                 _put_health("error", error=f"Max reconnect attempts reached: {error_msg}")
                 logger.error(
                     "Camera {}: giving up after {} attempts",
-                    camera_id, _MAX_ATTEMPTS,
+                    camera_id,
+                    _MAX_ATTEMPTS,
                 )
                 break
 
@@ -260,28 +271,32 @@ def _camera_worker(
 
 
 def _annotate_frame(
-    frame     : "np.ndarray",
-    tracked   : list,
-    camera_id : str,
-    fps       : float,
-) -> "np.ndarray":
+    frame: np.ndarray,
+    tracked: list,
+    camera_id: str,
+    fps: float,
+) -> np.ndarray:
     """Minimal annotation for multi-camera mode."""
     import cv2
 
     annotated = frame.copy()
-    h, w      = annotated.shape[:2]
+    h, w = annotated.shape[:2]
 
     for det in tracked:
-        x1, y1, x2, y2 = [int(v) for v in det.bbox_xyxy]
+        x1, y1, x2, y2 = (int(v) for v in det.bbox_xyxy)
         color = (0, 80, 220) if det.is_violation else (46, 204, 113)
         cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
 
         label = f"{det.class_name} ID:{det.track_id}"
         cv2.putText(
-            annotated, label,
+            annotated,
+            label,
             (x1, max(y1 - 4, 12)),
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.4, color, 1, cv2.LINE_AA,
+            0.4,
+            color,
+            1,
+            cv2.LINE_AA,
         )
 
     violations = sum(1 for d in tracked if d.is_violation)
@@ -290,7 +305,10 @@ def _annotate_frame(
         f"{camera_id} | FPS:{fps:.0f} | V:{violations}",
         (8, 20),
         cv2.FONT_HERSHEY_SIMPLEX,
-        0.5, (255, 255, 255), 2, cv2.LINE_AA,
+        0.5,
+        (255, 255, 255),
+        2,
+        cv2.LINE_AA,
     )
     return annotated
 
@@ -306,45 +324,45 @@ class CameraProcess:
 
     def __init__(
         self,
-        camera_id  : str,
+        camera_id: str,
         camera_name: str,
-        rtsp_url   : str,
-        zone_id    : Optional[str],
-        model_path : str,
-        device     : str = "cpu",
-        frame_skip : int = 2,
+        rtsp_url: str,
+        zone_id: str | None,
+        model_path: str,
+        device: str = "cpu",
+        frame_skip: int = 2,
     ) -> None:
-        self.camera_id   = camera_id
+        self.camera_id = camera_id
         self.camera_name = camera_name
-        self.rtsp_url    = rtsp_url
+        self.rtsp_url = rtsp_url
 
         ctx = mp.get_context("spawn")
-        self.frame_queue  = ctx.Queue(maxsize=_QUEUE_SIZE)
+        self.frame_queue = ctx.Queue(maxsize=_QUEUE_SIZE)
         self.health_queue = ctx.Queue(maxsize=50)
-        self._stop_event  = ctx.Event()
-        self._process     : Optional[mp.Process] = None
+        self._stop_event = ctx.Event()
+        self._process: mp.Process | None = None
 
         self._start_kwargs = dict(
-            camera_id    = camera_id,
-            camera_name  = camera_name,
-            rtsp_url     = rtsp_url,
-            zone_id      = zone_id,
-            model_path   = model_path,
-            device       = device,
-            frame_queue  = self.frame_queue,
-            health_queue = self.health_queue,
-            stop_event   = self._stop_event,
-            frame_skip   = frame_skip,
+            camera_id=camera_id,
+            camera_name=camera_name,
+            rtsp_url=rtsp_url,
+            zone_id=zone_id,
+            model_path=model_path,
+            device=device,
+            frame_queue=self.frame_queue,
+            health_queue=self.health_queue,
+            stop_event=self._stop_event,
+            frame_skip=frame_skip,
         )
 
     def start(self) -> None:
         """Spawn the camera subprocess."""
         self._stop_event.clear()
         self._process = mp.Process(
-            target = _camera_worker,
-            kwargs = self._start_kwargs,
-            name   = f"camera-{self.camera_id}",
-            daemon = True,
+            target=_camera_worker,
+            kwargs=self._start_kwargs,
+            name=f"camera-{self.camera_id}",
+            daemon=True,
         )
         self._process.start()
 

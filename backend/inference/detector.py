@@ -16,16 +16,17 @@ from __future__ import annotations
 
 import gc
 import os
-import re
 from pathlib import Path
-from typing import List, Optional, Union, Dict, Any
 
 import numpy as np
 from loguru import logger
 from ultralytics import YOLO
 
+
 # ── Config: Load from env with validation ─────────────────────
-def _validate_float_range(name: str, value: str, default: float, min_val: float, max_val: float) -> float:
+def _validate_float_range(
+    name: str, value: str, default: float, min_val: float, max_val: float
+) -> float:
     try:
         val = float(value)
         if not min_val <= val <= max_val:
@@ -35,13 +36,22 @@ def _validate_float_range(name: str, value: str, default: float, min_val: float,
         logger.warning("{} invalid: {} — using default {}", name, value, default)
         return default
 
+
 _MIN_THRESHOLD: float = 0.0
 _MAX_THRESHOLD: float = 1.0
 _MIN_IMGSZ: int = 32
 _MIN_WF: int = 1
 
-CONF_THRESHOLD = _validate_float_range("CONFIDENCE_THRESHOLD", os.getenv("CONFIDENCE_THRESHOLD", "0.35"), 0.35, _MIN_THRESHOLD, _MAX_THRESHOLD)
-IOU_THRESHOLD = _validate_float_range("IOU_THRESHOLD", os.getenv("IOU_THRESHOLD", "0.45"), 0.45, _MIN_THRESHOLD, _MAX_THRESHOLD)
+CONF_THRESHOLD = _validate_float_range(
+    "CONFIDENCE_THRESHOLD",
+    os.getenv("CONFIDENCE_THRESHOLD", "0.35"),
+    0.35,
+    _MIN_THRESHOLD,
+    _MAX_THRESHOLD,
+)
+IOU_THRESHOLD = _validate_float_range(
+    "IOU_THRESHOLD", os.getenv("IOU_THRESHOLD", "0.45"), 0.45, _MIN_THRESHOLD, _MAX_THRESHOLD
+)
 DEFAULT_IMGSZ = int(os.getenv("YOLO_IMGSZ", "640"))
 if DEFAULT_IMGSZ < _MIN_IMGSZ:
     logger.warning("YOLO_IMGSZ={} too small — using {}", DEFAULT_IMGSZ, _MIN_IMGSZ)
@@ -60,30 +70,37 @@ GC_AFTER_PREDICT = os.getenv("INFERENCE_GC_AFTER_PREDICT", "false").lower() == "
 # ── Custom exceptions ────────────────────────────────────────
 class InferenceError(Exception):
     """Base exception for inference operations."""
+
     pass
+
 
 class ModelLoadError(InferenceError):
     """Raised when model loading fails."""
+
     pass
+
 
 class InferenceRuntimeError(InferenceError):
     """Raised when inference execution fails."""
+
     pass
 
 
 # ── Helper: Validate model path ──────────────────────────────
-def _validate_model_path(path: Union[str, Path]) -> Path:
+def _validate_model_path(path: str | Path) -> Path:
     """Validate and sanitize model path."""
     model_path = Path(path).resolve()
-    
+
     # Prevent path traversal attacks
-    allowed_dirs = [Path(d).resolve() for d in os.getenv("ALLOWED_MODEL_DIRS", "./models").split(",")]
+    allowed_dirs = [
+        Path(d).resolve() for d in os.getenv("ALLOWED_MODEL_DIRS", "./models").split(",")
+    ]
     if not any(str(model_path).startswith(str(d)) for d in allowed_dirs):
         raise ModelLoadError(f"Model path not in allowed directories: {model_path}")
-    
+
     if not model_path.exists():
         raise ModelLoadError(f"Model weights not found: {model_path}\nRun Phase 7 training first.")
-    
+
     return model_path
 
 
@@ -95,7 +112,7 @@ class PPEDetector:
     # IMPROVED: Memory management for long-running processes
     # FIXED: Input validation + sanitization
     # FIXED: No credential leakage in logs
-    
+
     Responsibilities:
       - Load model once at startup
       - Preprocess frames (resize handled internally by YOLO)
@@ -111,7 +128,7 @@ class PPEDetector:
 
     def __init__(
         self,
-        model_path: Union[str, Path],
+        model_path: str | Path,
         device: str = "cpu",
         conf_threshold: float = CONF_THRESHOLD,
         iou_threshold: float = IOU_THRESHOLD,
@@ -147,38 +164,41 @@ class PPEDetector:
         self._export_tensorrt = export_tensorrt
 
         logger.info("Loading YOLOv8 model: {}", self.model_path.name)
-        
+
         # Load model with optimized settings
         self._model = YOLO(str(self.model_path))
-        
+
         # Optional: Export to TensorRT for production
         if export_tensorrt and device.startswith("cuda"):
             try:
                 self._export_to_tensorrt()
             except Exception as e:
                 logger.warning("TensorRT export failed: {} — using PyTorch model", e)
-        
+
         self._model.to(device)
         self._warmup()
 
-        self.class_names: List[str] = list(self._model.names.values())
+        self.class_names: list[str] = list(self._model.names.values())
         logger.info(
-            "PPEDetector ready | device={} | classes={} "
-            "| conf={} | iou={} | imgsz={}",
-            device, len(self.class_names), conf_threshold, iou_threshold, imgsz,
+            "PPEDetector ready | device={} | classes={} " "| conf={} | iou={} | imgsz={}",
+            device,
+            len(self.class_names),
+            conf_threshold,
+            iou_threshold,
+            imgsz,
         )
 
     def _export_to_tensorrt(self) -> None:
         """Export model to TensorRT engine for faster inference."""
         if not self._export_tensorrt or not self.device.startswith("cuda"):
             return
-        
+
         engine_path = Path(TENSORRT_ENGINE_PATH)
         if engine_path.exists():
             logger.info("TensorRT engine found: {} — loading", engine_path.name)
             # Note: ultralytics auto-loads .engine files if present
             return
-        
+
         try:
             logger.info("Exporting to TensorRT: {}", engine_path.name)
             self._model.export(
@@ -186,7 +206,7 @@ class PPEDetector:
                 imgsz=self.imgsz,
                 device=self.device,
                 workspace=4,  # 4GB workspace
-                half=True,    # FP16 precision
+                half=True,  # FP16 precision
             )
             logger.info("TensorRT export complete: {}", engine_path)
         except Exception as e:
@@ -214,32 +234,29 @@ class PPEDetector:
         """
         if not isinstance(frame, np.ndarray):
             raise ValueError(
-                f"{caller}: frame must be a numpy ndarray, "
-                f"got {type(frame).__name__}"
+                f"{caller}: frame must be a numpy ndarray, " f"got {type(frame).__name__}"
             )
         if frame.ndim != 3:
-            raise ValueError(
-                f"{caller}: frame must be 3-D (H, W, C), "
-                f"got ndim={frame.ndim}"
-            )
+            raise ValueError(f"{caller}: frame must be 3-D (H, W, C), " f"got ndim={frame.ndim}")
         if frame.shape[2] != 3:
             raise ValueError(
-                f"{caller}: frame must have 3 channels (BGR), "
-                f"got {frame.shape[2]}"
+                f"{caller}: frame must have 3 channels (BGR), " f"got {frame.shape[2]}"
             )
         # Check for reasonable frame sizes
         h, w = frame.shape[:2]
         if h < 100 or w < 100 or h > 4096 or w > 4096:
             logger.warning(
                 "{}: Unusual frame size {}x{} — inference may be slow or fail",
-                caller, w, h,
+                caller,
+                w,
+                h,
             )
 
     def predict(
         self,
         frame_bgr: np.ndarray,
-        conf: Optional[float] = None,
-        iou: Optional[float] = None,
+        conf: float | None = None,
+        iou: float | None = None,
     ):
         """
         Run inference on one BGR frame.
@@ -265,17 +282,20 @@ class PPEDetector:
                 device=self.device,
                 verbose=False,
             )[0]
-            
+
             # Optional: GC after predict to manage memory in long-running processes
             if GC_AFTER_PREDICT:
                 gc.collect()
-            
+
             return result
         except Exception as exc:
             # Log frame shape for debugging but redact actual content
             logger.error(
                 "YOLO inference failed | frame_shape={} | conf={} | iou={} | error={}",
-                frame_bgr.shape, effective_conf, effective_iou, type(exc).__name__,
+                frame_bgr.shape,
+                effective_conf,
+                effective_iou,
+                type(exc).__name__,
             )
             raise InferenceRuntimeError(
                 f"YOLO inference failed on frame shape {frame_bgr.shape}: {exc}"
@@ -283,9 +303,9 @@ class PPEDetector:
 
     def predict_batch(
         self,
-        frames: List[np.ndarray],
-        conf: Optional[float] = None,
-        iou: Optional[float] = None,
+        frames: list[np.ndarray],
+        conf: float | None = None,
+        iou: float | None = None,
     ):
         """
         Batch inference — more efficient when processing video files.
@@ -297,20 +317,21 @@ class PPEDetector:
         """
         if not frames:
             raise ValueError("predict_batch: frames list must not be empty")
-        
+
         # Validate batch size
         if len(frames) > MAX_BATCH_SIZE:
             logger.warning(
                 "Batch size {} exceeds MAX_BATCH_SIZE={} — splitting into chunks",
-                len(frames), MAX_BATCH_SIZE,
+                len(frames),
+                MAX_BATCH_SIZE,
             )
             # Process in chunks
             results = []
             for i in range(0, len(frames), MAX_BATCH_SIZE):
-                chunk = frames[i:i + MAX_BATCH_SIZE]
+                chunk = frames[i : i + MAX_BATCH_SIZE]
                 results.extend(self.predict_batch(chunk, conf, iou))
             return results
-        
+
         for idx, frame in enumerate(frames):
             self._validate_frame(frame, f"predict_batch[{idx}]")
 
@@ -326,30 +347,31 @@ class PPEDetector:
                 device=self.device,
                 verbose=False,
             )
-            
+
             if GC_AFTER_PREDICT:
                 gc.collect()
-            
+
             return results
         except Exception as exc:
             logger.error(
                 "YOLO batch inference failed | batch_size={} | error={}",
-                len(frames), type(exc).__name__,
+                len(frames),
+                type(exc).__name__,
             )
             raise InferenceRuntimeError(
                 f"YOLO batch inference failed (batch_size={len(frames)}): {exc}"
             ) from exc
 
-    def export_onnx(self, output_path: Optional[str] = None) -> str:
+    def export_onnx(self, output_path: str | None = None) -> str:
         """
         Export model to ONNX format for cross-platform deployment.
-        
+
         Returns:
             Path to exported ONNX file.
         """
         output = Path(output_path) if output_path else Path(ONNX_EXPORT_PATH)
         output.parent.mkdir(parents=True, exist_ok=True)
-        
+
         logger.info("Exporting to ONNX: {}", output.name)
         exported_path = self._model.export(
             format="onnx",
@@ -386,15 +408,18 @@ class PPEDetector:
         """Get approximate model memory usage in MB."""
         try:
             import torch
+
             if self.device.startswith("cuda") and torch.cuda.is_available():
                 return torch.cuda.memory_allocated(self.device) / 1024 / 1024
-        except Exception:  # FIXED: bare except: → except Exception (allows KeyboardInterrupt/SystemExit through)
+        except (
+            Exception
+        ):  # FIXED: bare except: → except Exception (allows KeyboardInterrupt/SystemExit through)
             pass
         return 0.0
 
 
 # ── Singleton with lazy initialization ───────────────────────
-_ppe_detector_instance: Optional[PPEDetector] = None
+_ppe_detector_instance: PPEDetector | None = None
 
 
 def get_ppe_detector(**kwargs) -> PPEDetector:

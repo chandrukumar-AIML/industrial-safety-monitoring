@@ -20,14 +20,13 @@ import csv
 import io
 import json
 import os
-from datetime import date, datetime, timezone, timedelta
-from typing import Optional
+from datetime import UTC, date, datetime, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.responses import StreamingResponse, Response
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response, StreamingResponse
+from loguru import logger
 from sqlalchemy import text
 from sqlmodel.ext.asyncio.session import AsyncSession
-from loguru import logger
 
 from ..database import get_session
 
@@ -38,17 +37,17 @@ _MAX_EXPORT_ROWS = int(os.getenv("EXPORT_MAX_ROWS", "50000"))
 
 def _safe_filename(prefix: str, ext: str) -> str:
     """Generate a timestamped, safe filename."""
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     return f"safety_monitor_{prefix}_{ts}.{ext}"
 
 
 def _date_range_params(
-    start_date: Optional[str],
-    end_date: Optional[str],
+    start_date: str | None,
+    end_date: str | None,
     default_days: int = 30,
 ) -> tuple[str, str]:
     """Parse and validate date range. Returns ISO date strings."""
-    now = datetime.now(timezone.utc).date()
+    now = datetime.now(UTC).date()
     if end_date:
         try:
             end = date.fromisoformat(end_date)
@@ -75,13 +74,14 @@ def _date_range_params(
 
 # ── Violations Export ─────────────────────────────────────────
 
+
 @router.get("/violations.csv", summary="Export violation events as CSV")
 async def export_violations_csv(
-    start_date: Optional[str] = Query(None, description="YYYY-MM-DD"),
-    end_date: Optional[str] = Query(None, description="YYYY-MM-DD"),
-    zone_id: Optional[str] = Query(None),
-    severity: Optional[str] = Query(None),
-    class_name: Optional[str] = Query(None),
+    start_date: str | None = Query(None, description="YYYY-MM-DD"),
+    end_date: str | None = Query(None, description="YYYY-MM-DD"),
+    zone_id: str | None = Query(None),
+    severity: str | None = Query(None),
+    class_name: str | None = Query(None),
     session: AsyncSession = Depends(get_session),
 ) -> StreamingResponse:
     """Download all violations as a CSV file."""
@@ -118,19 +118,41 @@ async def export_violations_csv(
     # Build CSV in memory
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow([
-        "ID", "Track ID", "Class", "Confidence", "Zone ID",
-        "BBox X1", "BBox Y1", "BBox X2", "BBox Y2",
-        "Frame", "Camera", "Timestamp", "Acknowledged"
-    ])
+    writer.writerow(
+        [
+            "ID",
+            "Track ID",
+            "Class",
+            "Confidence",
+            "Zone ID",
+            "BBox X1",
+            "BBox Y1",
+            "BBox X2",
+            "BBox Y2",
+            "Frame",
+            "Camera",
+            "Timestamp",
+            "Acknowledged",
+        ]
+    )
     for row in rows:
-        writer.writerow([
-            row["id"], row["track_id"], row["class_name"],
-            round(row["confidence"], 3), row["zone_id"] or "",
-            row["bbox_x1"], row["bbox_y1"], row["bbox_x2"], row["bbox_y2"],
-            row["frame_idx"], row["camera_id"] or "",
-            str(row["timestamp"]), row["acknowledged"],
-        ])
+        writer.writerow(
+            [
+                row["id"],
+                row["track_id"],
+                row["class_name"],
+                round(row["confidence"], 3),
+                row["zone_id"] or "",
+                row["bbox_x1"],
+                row["bbox_y1"],
+                row["bbox_x2"],
+                row["bbox_y2"],
+                row["frame_idx"],
+                row["camera_id"] or "",
+                str(row["timestamp"]),
+                row["acknowledged"],
+            ]
+        )
 
     logger.info("Violations CSV exported | rows={} | range={} to {}", len(rows), start, end)
 
@@ -138,15 +160,17 @@ async def export_violations_csv(
     return StreamingResponse(
         iter([output.getvalue()]),
         media_type="text/csv",
-        headers={"Content-Disposition": f'attachment; filename="{_safe_filename("violations", "csv")}"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="{_safe_filename("violations", "csv")}"'
+        },
     )
 
 
 @router.get("/violations.json", summary="Export violation events as JSON")
 async def export_violations_json(
-    start_date: Optional[str] = Query(None),
-    end_date: Optional[str] = Query(None),
-    zone_id: Optional[str] = Query(None),
+    start_date: str | None = Query(None),
+    end_date: str | None = Query(None),
+    zone_id: str | None = Query(None),
     session: AsyncSession = Depends(get_session),
 ) -> Response:
     """Download all violations as a JSON file."""
@@ -158,7 +182,9 @@ async def export_violations_json(
         params["zone_id"] = zone_id
 
     result = await session.execute(
-        text(f"SELECT * FROM violation_events WHERE {' AND '.join(where)} ORDER BY timestamp DESC LIMIT :limit"),
+        text(
+            f"SELECT * FROM violation_events WHERE {' AND '.join(where)} ORDER BY timestamp DESC LIMIT :limit"
+        ),
         params,
     )
     rows = [dict(r) for r in result.mappings().all()]
@@ -169,15 +195,18 @@ async def export_violations_json(
     return Response(
         content=payload,
         media_type="application/json",
-        headers={"Content-Disposition": f'attachment; filename="{_safe_filename("violations", "json")}"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="{_safe_filename("violations", "json")}"'
+        },
     )
 
 
 # ── Workers / Compliance Export ───────────────────────────────
 
+
 @router.get("/workers.csv", summary="Export worker compliance data as CSV")
 async def export_workers_csv(
-    risk_level: Optional[str] = Query(None),
+    risk_level: str | None = Query(None),
     session: AsyncSession = Depends(get_session),
 ) -> StreamingResponse:
     """Download worker compliance data as CSV."""
@@ -202,33 +231,54 @@ async def export_workers_csv(
 
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow([
-        "Worker ID", "Full Name", "Department", "Shift", "Role",
-        "Risk Score", "Risk Level", "HR Alerted", "Face Enrolled", "Created At"
-    ])
+    writer.writerow(
+        [
+            "Worker ID",
+            "Full Name",
+            "Department",
+            "Shift",
+            "Role",
+            "Risk Score",
+            "Risk Level",
+            "HR Alerted",
+            "Face Enrolled",
+            "Created At",
+        ]
+    )
     for row in rows:
-        writer.writerow([
-            row["worker_id"], row["full_name"], row["department"] or "",
-            row["shift"] or "", row["role"] or "",
-            round(row["risk_score"], 2), row["risk_level"],
-            row["hr_alerted"], row["enrolled"], str(row["created_at"]),
-        ])
+        writer.writerow(
+            [
+                row["worker_id"],
+                row["full_name"],
+                row["department"] or "",
+                row["shift"] or "",
+                row["role"] or "",
+                round(row["risk_score"], 2),
+                row["risk_level"],
+                row["hr_alerted"],
+                row["enrolled"],
+                str(row["created_at"]),
+            ]
+        )
 
     output.seek(0)
     return StreamingResponse(
         iter([output.getvalue()]),
         media_type="text/csv",
-        headers={"Content-Disposition": f'attachment; filename="{_safe_filename("workers", "csv")}"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="{_safe_filename("workers", "csv")}"'
+        },
     )
 
 
 # ── Incident Reports Export ───────────────────────────────────
 
+
 @router.get("/reports.csv", summary="Export incident reports as CSV")
 async def export_reports_csv(
-    start_date: Optional[str] = Query(None),
-    end_date: Optional[str] = Query(None),
-    severity: Optional[str] = Query(None),
+    start_date: str | None = Query(None),
+    end_date: str | None = Query(None),
+    severity: str | None = Query(None),
     session: AsyncSession = Depends(get_session),
 ) -> StreamingResponse:
     """Download incident reports summary as CSV."""
@@ -255,34 +305,57 @@ async def export_reports_csv(
 
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow([
-        "Report ID", "Violation ID", "Track ID", "Class", "Zone",
-        "Confidence", "Severity", "OSHA Reference",
-        "Model Used", "Generation MS", "Status", "Created At"
-    ])
+    writer.writerow(
+        [
+            "Report ID",
+            "Violation ID",
+            "Track ID",
+            "Class",
+            "Zone",
+            "Confidence",
+            "Severity",
+            "OSHA Reference",
+            "Model Used",
+            "Generation MS",
+            "Status",
+            "Created At",
+        ]
+    )
     for row in rows:
-        writer.writerow([
-            row["id"], row["violation_id"], row["track_id"],
-            row["class_name"], row["zone_id"] or "",
-            round(row["confidence"], 3), row["severity_level"],
-            row["osha_reference"] or "", row["model_used"] or "",
-            row["generation_ms"] or "", row["status"], str(row["created_at"]),
-        ])
+        writer.writerow(
+            [
+                row["id"],
+                row["violation_id"],
+                row["track_id"],
+                row["class_name"],
+                row["zone_id"] or "",
+                round(row["confidence"], 3),
+                row["severity_level"],
+                row["osha_reference"] or "",
+                row["model_used"] or "",
+                row["generation_ms"] or "",
+                row["status"],
+                str(row["created_at"]),
+            ]
+        )
 
     output.seek(0)
     return StreamingResponse(
         iter([output.getvalue()]),
         media_type="text/csv",
-        headers={"Content-Disposition": f'attachment; filename="{_safe_filename("reports", "csv")}"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="{_safe_filename("reports", "csv")}"'
+        },
     )
 
 
 # ── Zone Analytics Export ─────────────────────────────────────
 
+
 @router.get("/zone-analytics.csv", summary="Export zone violation analytics as CSV")
 async def export_zone_analytics_csv(
-    start_date: Optional[str] = Query(None),
-    end_date: Optional[str] = Query(None),
+    start_date: str | None = Query(None),
+    end_date: str | None = Query(None),
     session: AsyncSession = Depends(get_session),
 ) -> StreamingResponse:
     """Per-zone violation count analytics as CSV."""
@@ -309,21 +382,35 @@ async def export_zone_analytics_csv(
 
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow([
-        "Zone ID", "Zone Name", "Zone Type",
-        "Total Violations", "Unique Workers",
-        "Avg Confidence", "Unacknowledged"
-    ])
+    writer.writerow(
+        [
+            "Zone ID",
+            "Zone Name",
+            "Zone Type",
+            "Total Violations",
+            "Unique Workers",
+            "Avg Confidence",
+            "Unacknowledged",
+        ]
+    )
     for row in rows:
-        writer.writerow([
-            row["zone_id"], row["zone_name"] or "", row["zone_type"] or "",
-            row["total_violations"], row["unique_workers"],
-            round(row["avg_confidence"], 3), row["unacknowledged"],
-        ])
+        writer.writerow(
+            [
+                row["zone_id"],
+                row["zone_name"] or "",
+                row["zone_type"] or "",
+                row["total_violations"],
+                row["unique_workers"],
+                round(row["avg_confidence"], 3),
+                row["unacknowledged"],
+            ]
+        )
 
     output.seek(0)
     return StreamingResponse(
         iter([output.getvalue()]),
         media_type="text/csv",
-        headers={"Content-Disposition": f'attachment; filename="{_safe_filename("zone_analytics", "csv")}"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="{_safe_filename("zone_analytics", "csv")}"'
+        },
     )

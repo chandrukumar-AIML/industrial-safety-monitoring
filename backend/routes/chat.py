@@ -15,15 +15,12 @@ from __future__ import annotations
 
 import asyncio
 import os
-import re
 import time
 from collections import defaultdict
-from typing import AsyncGenerator
 
 from fastapi import APIRouter, HTTPException, Request, status
-from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
 from loguru import logger
+from pydantic import BaseModel, Field
 
 # NOTE: rag.chatbot pulls in langchain/chromadb. Imported lazily inside the
 # handler so the API can boot on a slim deploy (no heavy ML stack) — /chat then
@@ -41,10 +38,12 @@ _RATE_LIMIT_EVICT_AFTER_S: float = _RATE_LIMIT_WINDOW_S * 10
 def _check_rate_limit(client_ip: str) -> None:
     now = time.monotonic()
     # Evict stale IPs
-    stale = [ip for ip, ts in _rate_store.items() if not ts or (now - ts[-1]) > _RATE_LIMIT_EVICT_AFTER_S]
+    stale = [
+        ip for ip, ts in _rate_store.items() if not ts or (now - ts[-1]) > _RATE_LIMIT_EVICT_AFTER_S
+    ]
     for ip in stale:
         del _rate_store[ip]
-    
+
     window = _rate_store.get(client_ip, [])
     _rate_store[client_ip] = [t for t in window if now - t < _RATE_LIMIT_WINDOW_S]
     if len(_rate_store[client_ip]) >= _RATE_LIMIT_MAX:
@@ -58,7 +57,9 @@ def _check_rate_limit(client_ip: str) -> None:
 
 # ── Request / Response models ─────────────────────────────────
 class ChatRequest(BaseModel):
-    question: str = Field(min_length=1, max_length=1000, description="Natural language safety question")
+    question: str = Field(
+        min_length=1, max_length=1000, description="Natural language safety question"
+    )
     stream: bool = Field(default=False, description="Stream response via SSE")
 
 
@@ -114,9 +115,9 @@ async def chat(
     try:
         response = await asyncio.wait_for(
             chatbot.ask(body.question),
-            timeout=30.0  # Prevent hanging on slow LLM
+            timeout=30.0,  # Prevent hanging on slow LLM
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         raise HTTPException(status.HTTP_504_GATEWAY_TIMEOUT, "Chatbot request timed out")
     except RuntimeError as exc:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc))
@@ -143,8 +144,8 @@ async def chat(
 async def trigger_ingest() -> dict:
     """Manually trigger knowledge base re-ingestion."""
     try:
-        from ..rag.ingest.ingest_violations import ingest_violations
         from ..rag.ingest.ingest_pdfs import ingest_all
+        from ..rag.ingest.ingest_violations import ingest_violations
 
         # FIXED: get_running_loop() is correct inside an async function (get_event_loop() is deprecated)
         loop = asyncio.get_running_loop()
@@ -159,7 +160,9 @@ async def trigger_ingest() -> dict:
         }
     except Exception as exc:
         logger.exception("Ingestion failed")
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, f"Ingestion failed: {type(exc).__name__}")
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE, f"Ingestion failed: {type(exc).__name__}"
+        )
 
 
 @router.get(
@@ -169,6 +172,7 @@ async def trigger_ingest() -> dict:
 async def chat_health() -> dict:
     """Check if Ollama is reachable and ChromaDB is populated."""
     import httpx
+
     ollama_url = f"{os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')}/api/tags"
 
     ollama_ok = False
@@ -182,7 +186,8 @@ async def chat_health() -> dict:
     chroma_ok = False
     count = -1
     try:
-        from ..rag.vector_store import get_collection, COL_VIOLATIONS
+        from ..rag.vector_store import COL_VIOLATIONS, get_collection
+
         col = get_collection(COL_VIOLATIONS)
         count = col._collection.count()
         chroma_ok = count >= 0

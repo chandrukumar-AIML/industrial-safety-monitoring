@@ -12,11 +12,11 @@ Fire hazard event and heatmap endpoints.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import Response
+from loguru import logger
 from sqlalchemy import text
 from sqlmodel.ext.asyncio.session import AsyncSession
-from loguru import logger
 
 from ..database import get_session
 from ..state import app_state
@@ -37,12 +37,9 @@ async def fire_events(
             FROM fire_hazard_events
             ORDER BY timestamp DESC LIMIT :limit
         """),
-        {"limit": limit}
+        {"limit": limit},
     )
-    return [
-        {**dict(row), "timestamp": str(row["timestamp"])}
-        for row in result.mappings().all()
-    ]
+    return [{**dict(row), "timestamp": str(row["timestamp"])} for row in result.mappings().all()]
 
 
 @router.get("/heatmap")
@@ -59,6 +56,7 @@ async def fire_heatmap() -> Response:
 async def fire_status() -> dict:
     """Current fire alert engine state."""
     from ..alerts.fire_alert_engine import fire_alert_engine
+
     return {
         "state": fire_alert_engine.state,
         "is_emergency": fire_alert_engine.is_emergency,
@@ -79,6 +77,7 @@ def get_diagnostics() -> dict:
     pipeline = app_state.pipeline
     try:
         from ..alerts.fire_alert_engine import fire_alert_engine as _fae
+
         engine_state = _fae.state
     except Exception:
         engine_state = "unknown"

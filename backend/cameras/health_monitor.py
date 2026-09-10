@@ -31,16 +31,24 @@ import os
 import re
 import time
 from collections import defaultdict, deque
-from dataclasses import dataclass, field, asdict
-from datetime import datetime, timezone, timedelta
-from enum import Enum, auto
-from typing import Dict, List, Optional, Any, Protocol, runtime_checkable
+from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
+from enum import Enum
+from typing import Any, Protocol, runtime_checkable
 
 from loguru import logger
-from pydantic import BaseModel, Field, field_validator, model_validator  # FIXED: Pydantic v2 compatibility
+from pydantic import (  # FIXED: Pydantic v2 compatibility
+    BaseModel,
+    Field,
+    field_validator,
+    model_validator,
+)
+
 
 # ── Config: Load from env with validation ─────────────────────
-def _validate_positive_float(name: str, value: str, default: float, min_val: float = 0.1, max_val: float = 1000) -> float:
+def _validate_positive_float(
+    name: str, value: str, default: float, min_val: float = 0.1, max_val: float = 1000
+) -> float:
     try:
         val = float(value)
         if not min_val <= val <= max_val:
@@ -50,15 +58,24 @@ def _validate_positive_float(name: str, value: str, default: float, min_val: flo
         logger.warning("{} invalid: {} — using default {}", name, value, default)
         return default
 
+
 # Health thresholds
-MIN_FPS_THRESHOLD = _validate_positive_float("CAMERA_MIN_FPS_THRESHOLD", os.getenv("CAMERA_MIN_FPS_THRESHOLD", "5.0"), 5.0, 0.1, 60)
-MAX_ERROR_RATE_THRESHOLD = _validate_positive_float("CAMERA_MAX_ERROR_RATE", os.getenv("CAMERA_MAX_ERROR_RATE", "0.1"), 0.1, 0.01, 1.0)
+MIN_FPS_THRESHOLD = _validate_positive_float(
+    "CAMERA_MIN_FPS_THRESHOLD", os.getenv("CAMERA_MIN_FPS_THRESHOLD", "5.0"), 5.0, 0.1, 60
+)
+MAX_ERROR_RATE_THRESHOLD = _validate_positive_float(
+    "CAMERA_MAX_ERROR_RATE", os.getenv("CAMERA_MAX_ERROR_RATE", "0.1"), 0.1, 0.01, 1.0
+)
 MAX_RECONNECT_THRESHOLD = int(os.getenv("CAMERA_MAX_RECONNECT_THRESHOLD", "3"))
-STREAM_TIMEOUT_S = _validate_positive_float("CAMERA_STREAM_TIMEOUT_S", os.getenv("CAMERA_STREAM_TIMEOUT_S", "30.0"), 30.0, 5, 300)
+STREAM_TIMEOUT_S = _validate_positive_float(
+    "CAMERA_STREAM_TIMEOUT_S", os.getenv("CAMERA_STREAM_TIMEOUT_S", "30.0"), 30.0, 5, 300
+)
 HEALTH_WINDOW_S = int(os.getenv("CAMERA_HEALTH_WINDOW_S", "300"))  # 5-minute sliding window
 
 # Alert escalation
-ALERT_COOLDOWN_S = int(os.getenv("CAMERA_ALERT_COOLDOWN_S", "300"))  # 5 min between same-type alerts
+ALERT_COOLDOWN_S = int(
+    os.getenv("CAMERA_ALERT_COOLDOWN_S", "300")
+)  # 5 min between same-type alerts
 ESCALATION_ENABLED = os.getenv("CAMERA_ALERT_ESCALATION", "true").lower() == "true"
 
 # Metrics retention
@@ -88,27 +105,28 @@ class EventType(str, Enum):
 # ── Pydantic models for structured data ───────────────────────
 class HealthMetrics(BaseModel):
     """Aggregated health metrics for a camera."""
+
     camera_id: str = Field(..., min_length=1, max_length=100)
     status: HealthStatus = HealthStatus.UNKNOWN
     current_fps: float = Field(default=0.0, ge=0)
     avg_fps_window: float = Field(default=0.0, ge=0)
     error_rate: float = Field(default=0.0, ge=0, le=1)
     uptime_pct: float = Field(default=0.0, ge=0, le=100)
-    last_seen: Optional[str] = None  # ISO timestamp
-    last_error: Optional[str] = None
+    last_seen: str | None = None  # ISO timestamp
+    last_error: str | None = None
     reconnect_count: int = Field(default=0, ge=0)
-    anomaly_flags: List[str] = Field(default_factory=list)
-    updated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-    
+    anomaly_flags: list[str] = Field(default_factory=list)
+    updated_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
+
     @field_validator("camera_id")
     @classmethod
     def validate_camera_id(cls, v):
-        if not re.match(r'^[a-zA-Z0-9_\-]+$', v):
+        if not re.match(r"^[a-zA-Z0-9_\-]+$", v):
             raise ValueError("camera_id must be alphanumeric with dash/underscore")
         return v
 
     @model_validator(mode="after")
-    def derive_status(self) -> "HealthMetrics":
+    def derive_status(self) -> HealthMetrics:
         """Auto-derive health status from metrics."""
         status = HealthStatus.HEALTHY
         flags = list(self.anomaly_flags)
@@ -116,7 +134,7 @@ class HealthMetrics(BaseModel):
         if self.last_seen:
             try:
                 last_seen = datetime.fromisoformat(self.last_seen.replace("Z", "+00:00"))
-                if datetime.now(timezone.utc) - last_seen > timedelta(seconds=STREAM_TIMEOUT_S):
+                if datetime.now(UTC) - last_seen > timedelta(seconds=STREAM_TIMEOUT_S):
                     status = HealthStatus.OFFLINE
             except Exception:
                 pass
@@ -138,8 +156,8 @@ class HealthMetrics(BaseModel):
         self.status = status
         self.anomaly_flags = flags
         return self
-    
-    def to_prometheus_labels(self) -> Dict[str, str]:
+
+    def to_prometheus_labels(self) -> dict[str, str]:
         """Convert to Prometheus metric labels."""
         return {
             "camera_id": self.camera_id,
@@ -150,13 +168,14 @@ class HealthMetrics(BaseModel):
 @dataclass
 class HealthEvent:
     """Single health event for sliding window analysis."""
+
     event_type: EventType
     timestamp: float = field(default_factory=time.monotonic)
-    fps: Optional[float] = None
-    error_msg: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
-    
-    def to_dict(self) -> Dict[str, Any]:
+    fps: float | None = None
+    error_msg: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
         return {
             "event_type": self.event_type.value,
             "timestamp": self.timestamp,
@@ -170,24 +189,32 @@ class HealthEvent:
 @runtime_checkable
 class AlertWorkerProtocol(Protocol):
     """Protocol for alert worker — enables mocking in tests."""
+
     async def enqueue(self, job: Any) -> bool: ...
 
 
 # ── Custom exceptions ────────────────────────────────────────
 class CameraError(Exception):
     """Base exception for camera operations."""
+
     pass
+
 
 class CameraNotFoundError(CameraError):
     """Raised when camera ID not found."""
+
     pass
+
 
 class CameraConnectionError(CameraError):
     """Raised when camera connection fails."""
+
     pass
+
 
 class CameraLimitError(CameraError):
     """Raised when camera limit exceeded."""
+
     pass
 
 
@@ -196,7 +223,7 @@ def _sanitize_camera_id(camera_id: str) -> str:
     """Sanitize camera_id for safe usage."""
     if not camera_id:
         raise ValueError("camera_id cannot be empty")
-    cleaned = re.sub(r'[^a-zA-Z0-9_\-]', '_', camera_id.strip())
+    cleaned = re.sub(r"[^a-zA-Z0-9_\-]", "_", camera_id.strip())
     if not cleaned:
         raise ValueError(f"Invalid camera_id after sanitization: {camera_id}")
     return cleaned[:100]
@@ -205,12 +232,12 @@ def _sanitize_camera_id(camera_id: str) -> str:
 class CameraHealthMonitor:
     """
     Monitors health of all camera processes.
-    
+
     # IMPROVED: Sliding window metrics for accurate anomaly detection
     # IMPROVED: Alert escalation with cooldown management
     # FIXED: Thread-safe via asyncio (single-threaded event loop)
     # IMPROVED: Prometheus-compatible metrics export
-    
+
     Usage:
         monitor = CameraHealthMonitor()
         await monitor.start(db_factory)
@@ -227,7 +254,7 @@ class CameraHealthMonitor:
         max_reconnects: int = MAX_RECONNECT_THRESHOLD,
         window_seconds: int = HEALTH_WINDOW_S,
         alert_cooldown: int = ALERT_COOLDOWN_S,
-        alert_worker: Optional[AlertWorkerProtocol] = None,
+        alert_worker: AlertWorkerProtocol | None = None,
     ) -> None:
         # Config (injectable for testing)
         self._min_fps = min_fps
@@ -237,22 +264,24 @@ class CameraHealthMonitor:
         self._alert_cooldown = alert_cooldown
         self._alert_worker = alert_worker
         self._escalation_enabled = ESCALATION_ENABLED
-        
+
         # Per-camera state
-        self._events: Dict[str, deque] = defaultdict(
+        self._events: dict[str, deque] = defaultdict(
             lambda: deque(maxlen=1000)  # Bounded to prevent memory leak
         )
-        self._last_alert: Dict[str, Dict[EventType, float]] = defaultdict(dict)
-        self._metrics_cache: Dict[str, HealthMetrics] = {}
+        self._last_alert: dict[str, dict[EventType, float]] = defaultdict(dict)
+        self._metrics_cache: dict[str, HealthMetrics] = {}
         self._db_factory = None
-        
+
         # Global stats
         self._total_events = 0
         self._alerts_sent = 0
-        
+
         logger.info(
             "CameraHealthMonitor initialised | window={}s | min_fps={} | max_error_rate={}",
-            window_seconds, min_fps, max_error_rate,
+            window_seconds,
+            min_fps,
+            max_error_rate,
         )
 
     async def start(self, db_factory) -> None:
@@ -270,17 +299,17 @@ class CameraHealthMonitor:
         self,
         camera_id: str,
         event_type: EventType | str,
-        fps: Optional[float] = None,
-        error_msg: Optional[str] = None,
+        fps: float | None = None,
+        error_msg: str | None = None,
         **metadata,
     ) -> None:
         """
         Record a health event for a camera.
-        
+
         # FIXED: Validate inputs + sanitize camera_id
         """
         camera_id_safe = _sanitize_camera_id(camera_id)
-        
+
         # Convert string to EventType if needed
         if isinstance(event_type, str):
             try:
@@ -288,20 +317,20 @@ class CameraHealthMonitor:
             except ValueError:
                 logger.warning("Unknown event type: {} — using ERROR", event_type)
                 event_type = EventType.ERROR
-        
+
         event = HealthEvent(
             event_type=event_type,
             fps=fps,
             error_msg=error_msg[:500] if error_msg else None,  # Truncate long errors
             metadata=metadata,
         )
-        
+
         self._events[camera_id_safe].append(event)
         self._total_events += 1
-        
+
         # Update metrics cache asynchronously
         self._metrics_cache[camera_id_safe] = self._compute_metrics(camera_id_safe)
-        
+
         # Check for alert conditions
         if self._should_alert(camera_id_safe, event):
             asyncio.create_task(
@@ -314,50 +343,54 @@ class CameraHealthMonitor:
         events = list(self._events[camera_id])
         now = time.monotonic()
         window_start = now - self._window_seconds
-        
+
         # Filter to window
         recent = [e for e in events if e.timestamp >= window_start]
-        
+
         if not recent:
             return HealthMetrics(
                 camera_id=camera_id,
                 status=HealthStatus.UNKNOWN,
             )
-        
+
         # Compute FPS stats
-        fps_values = [e.fps for e in recent if e.fps is not None and e.event_type == EventType.FRAME]
+        fps_values = [
+            e.fps for e in recent if e.fps is not None and e.event_type == EventType.FRAME
+        ]
         current_fps = fps_values[-1] if fps_values else 0.0
         avg_fps = sum(fps_values) / len(fps_values) if fps_values else 0.0
-        
+
         # Compute error rate
-        error_events = sum(1 for e in recent if e.event_type in (EventType.ERROR, EventType.DISCONNECTED))
+        error_events = sum(
+            1 for e in recent if e.event_type in (EventType.ERROR, EventType.DISCONNECTED)
+        )
         total_events = len(recent)
         error_rate = error_events / total_events if total_events > 0 else 0.0
-        
+
         # Compute uptime (time since last disconnect vs total window)
         last_disconnect = max(
             (e.timestamp for e in recent if e.event_type == EventType.DISCONNECTED),
             default=window_start,
         )
         uptime_pct = min(100.0, (now - last_disconnect) / self._window_seconds * 100)
-        
+
         # Get last seen + error
         last_seen = recent[-1].timestamp if recent else None
         last_error = next(
             (e.error_msg for e in reversed(recent) if e.error_msg),
             None,
         )
-        
+
         # Count reconnects in window
         reconnect_count = sum(1 for e in recent if e.event_type == EventType.RECONNECT)
-        
+
         return HealthMetrics(
             camera_id=camera_id,
             current_fps=round(current_fps, 1),
             avg_fps_window=round(avg_fps, 1),
             error_rate=round(error_rate, 3),
             uptime_pct=round(uptime_pct, 1),
-            last_seen=datetime.now(timezone.utc).isoformat() if last_seen else None,
+            last_seen=datetime.now(UTC).isoformat() if last_seen else None,
             last_error=last_error,
             reconnect_count=reconnect_count,
         )
@@ -366,11 +399,11 @@ class CameraHealthMonitor:
         """Determine if this event should trigger an alert."""
         now = time.monotonic()
         last_alert_time = self._last_alert[camera_id].get(event.event_type, 0)
-        
+
         # Cooldown check
         if now - last_alert_time < self._alert_cooldown:
             return False
-        
+
         # Alert conditions
         if event.event_type == EventType.ERROR and event.error_msg:
             return True
@@ -378,7 +411,7 @@ class CameraHealthMonitor:
             return True
         if event.event_type == EventType.LOW_FPS and event.fps and event.fps < self._min_fps * 0.5:
             return True
-        
+
         return False
 
     async def _trigger_alert(
@@ -390,13 +423,13 @@ class CameraHealthMonitor:
         """Send alert via alert_worker if configured."""
         if not self._alert_worker or not self._escalation_enabled:
             return
-        
+
         try:
             # Import here to avoid circular dependency
             from alerts.alert_worker import AlertJob
-            
+
             severity = "HIGH" if metrics.status == HealthStatus.UNHEALTHY else "MEDIUM"
-            
+
             job = AlertJob(
                 zone_id=camera_id,
                 zone_name=f"Camera Health: {camera_id}",
@@ -404,18 +437,20 @@ class CameraHealthMonitor:
                 track_id=0,
                 missing_ppe=[f"{event.event_type.value}: {event.error_msg or 'No details'}"],
                 severity=severity,
-                timestamp=datetime.now(timezone.utc).isoformat(),
+                timestamp=datetime.now(UTC).isoformat(),
             )
-            
+
             enqueued = await self._alert_worker.enqueue(job)
             if enqueued:
                 self._alerts_sent += 1
                 self._last_alert[camera_id][event.event_type] = time.monotonic()
                 logger.warning(
                     "Camera alert sent | camera={} | type={} | severity={}",
-                    camera_id, event.event_type.value, severity,
+                    camera_id,
+                    event.event_type.value,
+                    severity,
                 )
-                
+
         except ImportError:
             logger.debug("AlertWorker not available — skipping alert")
         except Exception as exc:
@@ -424,24 +459,21 @@ class CameraHealthMonitor:
     def get_camera_health(self, camera_id: str) -> HealthMetrics:
         """Get current health metrics for a camera."""
         camera_id_safe = _sanitize_camera_id(camera_id)
-        
+
         # Return cached metrics or compute fresh
         if camera_id_safe not in self._metrics_cache:
             self._metrics_cache[camera_id_safe] = self._compute_metrics(camera_id_safe)
-        
+
         return self._metrics_cache[camera_id_safe]
 
-    def get_all_health(self) -> Dict[str, HealthMetrics]:
+    def get_all_health(self) -> dict[str, HealthMetrics]:
         """Get health metrics for all tracked cameras."""
-        return {
-            cam_id: self.get_camera_health(cam_id)
-            for cam_id in list(self._events.keys())
-        }
+        return {cam_id: self.get_camera_health(cam_id) for cam_id in list(self._events.keys())}
 
     def get_prometheus_metrics(self) -> str:
         """
         Export metrics in Prometheus text format.
-        
+
         Example output:
             camera_fps{camera_id="cam-01",status="healthy"} 24.5
             camera_error_rate{camera_id="cam-01"} 0.02
@@ -449,30 +481,30 @@ class CameraHealthMonitor:
             camera_alerts_total{camera_id="cam-01"} 3
         """
         lines = []
-        
-        for cam_id, metrics in self.get_all_health().items():
+
+        for _cam_id, metrics in self.get_all_health().items():
             labels = ",".join(f'{k}="{v}"' for k, v in metrics.to_prometheus_labels().items())
-            
-            lines.append(f'camera_fps{{{labels}}} {metrics.current_fps}')
-            lines.append(f'camera_avg_fps{{{labels}}} {metrics.avg_fps_window}')
-            lines.append(f'camera_error_rate{{{labels}}} {metrics.error_rate}')
-            lines.append(f'camera_uptime_pct{{{labels}}} {metrics.uptime_pct}')
-            lines.append(f'camera_reconnects{{{labels}}} {metrics.reconnect_count}')
-        
+
+            lines.append(f"camera_fps{{{labels}}} {metrics.current_fps}")
+            lines.append(f"camera_avg_fps{{{labels}}} {metrics.avg_fps_window}")
+            lines.append(f"camera_error_rate{{{labels}}} {metrics.error_rate}")
+            lines.append(f"camera_uptime_pct{{{labels}}} {metrics.uptime_pct}")
+            lines.append(f"camera_reconnects{{{labels}}} {metrics.reconnect_count}")
+
         # Global counters
-        lines.append(f'camera_events_total {self._total_events}')
-        lines.append(f'camera_alerts_total {self._alerts_sent}')
-        
+        lines.append(f"camera_events_total {self._total_events}")
+        lines.append(f"camera_alerts_total {self._alerts_sent}")
+
         return "\n".join(lines) + "\n"
 
-    def get_summary(self) -> Dict[str, Any]:
+    def get_summary(self) -> dict[str, Any]:
         """Get human-readable summary for dashboard."""
         all_health = self.get_all_health()
-        
+
         status_counts = defaultdict(int)
         for m in all_health.values():
             status_counts[m.status.value] += 1
-        
+
         return {
             "total_cameras": len(all_health),
             "by_status": dict(status_counts),
@@ -503,7 +535,7 @@ class CameraHealthMonitor:
         """
         cutoff = time.monotonic() - (older_than_hours * 3600)
         cleaned = 0
-        
+
         for cam_id in list(self._events.keys()):
             events = self._events[cam_id]
             # Remove old events from left of deque
@@ -515,14 +547,14 @@ class CameraHealthMonitor:
                 self._metrics_cache.pop(cam_id, None)
                 self._last_alert.pop(cam_id, None)
                 cleaned += 1
-        
+
         if cleaned > 0:
             logger.info("Cleaned up {} cameras with old data", cleaned)
         return cleaned
 
 
 # ── Singleton with lazy initialization ───────────────────────
-_health_monitor_instance: Optional[CameraHealthMonitor] = None
+_health_monitor_instance: CameraHealthMonitor | None = None
 
 
 def get_health_monitor(**kwargs) -> CameraHealthMonitor:

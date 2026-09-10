@@ -30,15 +30,15 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     # Type hints only — no runtime import cost
     from .detector import PPEDetector
-    from .tracker import ByteTracker, TrackedDetection, TrackHistory
-    from .fire_detector import FireDetector, FireDetection, FireHeatmap
-    from .pose_detector import PoseDetector, PoseLandmarks
-    from .proximity_engine import ProximityEngine, ProximityAlert
-    from .heatmap import HeatmapGenerator, ZoneRisk
-    from .light_enhancer import LightEnhancer, EnhancementStats, LightMode
     from .explainer import SHAPExplainer
-    from .zones import load_zones, ZoneRegistrar
-    from .machinery_detector import MachineryDetector, MachineryDetection
+    from .fire_detector import FireDetection, FireDetector, FireHeatmap
+    from .heatmap import HeatmapGenerator, ZoneRisk
+    from .light_enhancer import EnhancementStats, LightEnhancer, LightMode
+    from .machinery_detector import MachineryDetection, MachineryDetector
+    from .pose_detector import PoseDetector, PoseLandmarks
+    from .proximity_engine import ProximityAlert, ProximityEngine
+    from .tracker import ByteTracker, TrackedDetection, TrackHistory
+    from .zones import ZoneRegistrar, load_zones
 
 # ── Explicit public API ──────────────────────────────────────
 __all__ = [
@@ -47,7 +47,6 @@ __all__ = [
     "FireDetector",
     "MachineryDetector",
     "PoseDetector",
-    
     # Tracking & data classes
     "ByteTracker",
     "TrackedDetection",
@@ -56,7 +55,6 @@ __all__ = [
     "FireHeatmap",
     "PoseLandmarks",
     "MachineryDetection",
-    
     # Analysis engines
     "ProximityEngine",
     "ProximityAlert",
@@ -65,19 +63,15 @@ __all__ = [
     "LightEnhancer",
     "EnhancementStats",
     "LightMode",
-    
     # Explainability
     "SHAPExplainer",
-    
     # Zone management
     "load_zones",
     "ZoneRegistrar",
-    
     # Exceptions
     "InferenceError",
     "ModelLoadError",
     "InferenceRuntimeError",
-    
     # Config helpers
     "get_inference_config",
     "validate_inference_config",
@@ -91,11 +85,12 @@ __description__ = "Computer vision inference pipeline for Industrial Safety Moni
 # ── Config helpers ───────────────────────────────────────────
 def get_inference_config() -> dict:
     """Return current inference system configuration."""
-    from .detector import _MIN_THRESHOLD, _MAX_THRESHOLD, _MIN_IMGSZ
+    from .detector import _MAX_THRESHOLD, _MIN_IMGSZ, _MIN_THRESHOLD
     from .fire_detector import FIRE_CONF_THRESH, SMOKE_CONF_THRESH
     from .heatmap import HeatmapGenerator
-    from .light_enhancer import ENABLED as LIGHT_ENABLED, DARK_THRESHOLD
-    
+    from .light_enhancer import DARK_THRESHOLD
+    from .light_enhancer import ENABLED as LIGHT_ENABLED
+
     return {
         "model": {
             "conf_threshold_range": (_MIN_THRESHOLD, _MAX_THRESHOLD),
@@ -124,6 +119,7 @@ def _get_available_devices() -> list[str]:
     devices = ["cpu"]
     try:
         import torch
+
         if torch.cuda.is_available():
             devices.append(f"cuda:{torch.cuda.current_device()}")
             devices.append("cuda")
@@ -140,7 +136,7 @@ def validate_inference_config() -> list[str]:
     Returns list of warnings (empty = OK).
     """
     warnings = []
-    
+
     # Check model paths
     model_paths = [
         os.getenv("MODEL_PATH", "models/best.pt"),
@@ -149,18 +145,21 @@ def validate_inference_config() -> list[str]:
     ]
     for path in model_paths:
         if not os.path.exists(path):
-            warnings.append(f"Model not found: {path} — inference will fail until model is available")
-    
+            warnings.append(
+                f"Model not found: {path} — inference will fail until model is available"
+            )
+
     # Check device config
     device = os.getenv("DEVICE", "cpu").lower()
     if device.startswith("cuda"):
         try:
             import torch
+
             if not torch.cuda.is_available():
                 warnings.append(f"DEVICE={device} but CUDA not available — falling back to CPU")
         except ImportError:
             warnings.append("PyTorch not installed — CUDA/MPS devices unavailable")
-    
+
     # Check threshold configs
     try:
         conf = float(os.getenv("CONFIDENCE_THRESHOLD", "0.35"))
@@ -168,58 +167,69 @@ def validate_inference_config() -> list[str]:
             warnings.append(f"CONFIDENCE_THRESHOLD={conf} outside 0-1 range")
     except ValueError:
         warnings.append("CONFIDENCE_THRESHOLD must be a float")
-    
+
     return warnings
 
 
 # ── Lazy loader for heavy imports ────────────────────────────
 def __getattr__(name: str) -> Any:
     """Lazy-load submodules only when accessed."""
-    
+
     if name in ("PPEDetector",):
         from . import detector as module
+
         return getattr(module, name)
-    
+
     if name in ("ByteTracker", "TrackedDetection", "TrackHistory"):
         from . import tracker as module
+
         return getattr(module, name)
-    
+
     if name in ("FireDetector", "FireDetection", "FireHeatmap"):
         from . import fire_detector as module
+
         return getattr(module, name)
-    
+
     if name in ("MachineryDetector", "MachineryDetection"):
         from . import machinery_detector as module
+
         return getattr(module, name)
-    
+
     if name in ("PoseDetector", "PoseLandmarks"):
         from . import pose_detector as module
+
         return getattr(module, name)
-    
+
     if name in ("ProximityEngine", "ProximityAlert"):
         from . import proximity_engine as module
+
         return getattr(module, name)
-    
+
     if name in ("HeatmapGenerator", "ZoneRisk"):
         from . import heatmap as module
+
         return getattr(module, name)
-    
+
     if name in ("LightEnhancer", "EnhancementStats", "LightMode"):
         from . import light_enhancer as module
+
         return getattr(module, name)
-    
+
     if name in ("SHAPExplainer",):
         from . import explainer as module
+
         return getattr(module, name)
-    
+
     if name in ("load_zones", "ZoneRegistrar"):
         from . import zones as module
+
         return getattr(module, name)
-    
+
     if name in ("InferenceError", "ModelLoadError", "InferenceRuntimeError"):
         from . import detector as module
+
         return getattr(module, name)
-    
+
     raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
 
@@ -227,5 +237,6 @@ def __getattr__(name: str) -> Any:
 _inference_warnings = validate_inference_config()
 if _inference_warnings and os.getenv("INFERENCE_STRICT_MODE", "false").lower() == "true":
     import warnings as _warnings
+
     for w in _inference_warnings:
         _warnings.warn(f"Inference config: {w}", RuntimeWarning, stacklevel=2)

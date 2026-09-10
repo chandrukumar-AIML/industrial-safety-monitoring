@@ -16,15 +16,13 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime, timezone
-from typing import List, Optional
+from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status, Response
-
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from loguru import logger
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import text
 from sqlmodel.ext.asyncio.session import AsyncSession
-from loguru import logger
 
 from ..database import get_session
 
@@ -35,31 +33,31 @@ router = APIRouter(prefix="/alert-config", tags=["alerts"])
 class RecipientCreate(BaseModel):
     name: str = Field(min_length=1, max_length=128)
     role: str = Field(min_length=1, max_length=64)
-    email: Optional[str] = Field(default=None)
-    whatsapp_number: Optional[str] = Field(default=None)
+    email: str | None = Field(default=None)
+    whatsapp_number: str | None = Field(default=None)
     notify_critical: bool = True
     notify_high: bool = True
     notify_medium: bool = False
     notify_low: bool = False
-    zone_filter: Optional[List[str]] = None
+    zone_filter: list[str] | None = None
 
     @field_validator("whatsapp_number")
     @classmethod
-    def validate_whatsapp(cls, v: Optional[str]) -> Optional[str]:
+    def validate_whatsapp(cls, v: str | None) -> str | None:
         if v is None:
             return v
         # E.164 format: +[country code][number]
-        if not re.match(r'^\+[1-9]\d{1,14}$', v):
+        if not re.match(r"^\+[1-9]\d{1,14}$", v):
             raise ValueError("whatsapp_number must be in E.164 format: +1234567890")
         return v
 
     @field_validator("email")
     @classmethod
-    def validate_email(cls, v: Optional[str]) -> Optional[str]:
+    def validate_email(cls, v: str | None) -> str | None:
         if v is None:
             return v
         # Basic email validation
-        if not re.match(r'^[^@]+@[^@]+\.[^@]+$', v):
+        if not re.match(r"^[^@]+@[^@]+\.[^@]+$", v):
             raise ValueError("Invalid email format")
         return v
 
@@ -67,31 +65,31 @@ class RecipientCreate(BaseModel):
     @classmethod
     def sanitize_name(cls, v: str) -> str:
         # Strip and sanitize
-        return re.sub(r'[<>{}]', '', v.strip())
+        return re.sub(r"[<>{}]", "", v.strip())
 
 
 class RecipientOut(BaseModel):
     id: int
     name: str
     role: str
-    email: Optional[str]
-    whatsapp_number: Optional[str]
+    email: str | None
+    whatsapp_number: str | None
     notify_critical: bool
     notify_high: bool
     notify_medium: bool
     notify_low: bool
-    zone_filter: Optional[List[str]]
+    zone_filter: list[str] | None
     active: bool
     created_at: str
 
 
 class AlertLogOut(BaseModel):
     id: int
-    recipient_id: Optional[int]
-    alert_type: Optional[str]
-    zone_id: Optional[str]
-    track_id: Optional[int]
-    severity: Optional[str]
+    recipient_id: int | None
+    alert_type: str | None
+    zone_id: str | None
+    track_id: int | None
+    severity: str | None
     status: str
     sent_at: str
 
@@ -105,7 +103,7 @@ class AlertStatsOut(BaseModel):
 
 
 # ── Helper: Redact PII for logging ───────────────────────────
-def _redact_contact(email: Optional[str], phone: Optional[str]) -> tuple[str, str]:
+def _redact_contact(email: str | None, phone: str | None) -> tuple[str, str]:
     """Redact email and phone for safe logging."""
     redacted_email = "***@***" if email else None
     redacted_phone = "+***" if phone else None
@@ -115,7 +113,7 @@ def _redact_contact(email: Optional[str], phone: Optional[str]) -> tuple[str, st
 # ── Endpoints ─────────────────────────────────────────────────
 @router.get(
     "/recipients",
-    response_model=List[RecipientOut],
+    response_model=list[RecipientOut],
     summary="List alert recipients",
 )
 async def list_recipients(
@@ -182,20 +180,25 @@ async def create_recipient(
             "notify_medium": body.notify_medium,
             "notify_low": body.notify_low,
             "zone_filter": zone_json,
-        }
+        },
     )
     row = result.mappings().first()
     await session.commit()
 
     # Refresh worker recipients
     from ..alerts.alert_worker import alert_worker
-    from ..database import AsyncSessionLocal
+
     await alert_worker._refresh_recipients()
 
     # Log without PII
     redacted_email, redacted_phone = _redact_contact(body.email, body.whatsapp_number)
-    logger.info("Recipient created: {} | role={} | email={} | phone={}", 
-                body.name, body.role, redacted_email, redacted_phone)
+    logger.info(
+        "Recipient created: {} | role={} | email={} | phone={}",
+        body.name,
+        body.role,
+        redacted_email,
+        redacted_phone,
+    )
 
     return {
         "id": row["id"],
@@ -212,6 +215,7 @@ async def create_recipient(
         "created_at": str(row["created_at"]),
     }
 
+
 @router.delete(
     "/recipients/{recipient_id}",
     status_code=status.HTTP_204_NO_CONTENT,
@@ -221,33 +225,34 @@ async def delete_recipient(
     recipient_id: int,
     session: AsyncSession = Depends(get_session),
 ) -> Response:
-    
     if recipient_id < 1:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid recipient_id")
-    
+
     result = await session.execute(
         text("""
             UPDATE alert_recipients
             SET active=0
             WHERE id=:id
         """),
-        {"id": recipient_id}
+        {"id": recipient_id},
     )
     await session.commit()
-    
+
     if result.rowcount == 0:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Recipient not found")
 
     from ..alerts.alert_worker import alert_worker
+
     await alert_worker._refresh_recipients()
 
     logger.info("Recipient deactivated: id={}", recipient_id)
 
-    return Response(status_code=status.HTTP_204_NO_CONTENT) 
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
 
 @router.get(
     "/logs",
-    response_model=List[AlertLogOut],
+    response_model=list[AlertLogOut],
     summary="Alert send logs",
 )
 async def alert_logs(
@@ -263,12 +268,9 @@ async def alert_logs(
             ORDER BY sent_at DESC
             LIMIT :limit
         """),
-        {"limit": limit}
+        {"limit": limit},
     )
-    return [
-        {**dict(row), "sent_at": str(row["sent_at"])}
-        for row in result.mappings().all()
-    ]
+    return [{**dict(row), "sent_at": str(row["sent_at"])} for row in result.mappings().all()]
 
 
 @router.get(
@@ -331,10 +333,9 @@ async def send_test_alert(
     # Validate ID
     if recipient_id < 1:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid recipient_id")
-    
+
     result = await session.execute(
-        text("SELECT * FROM alert_recipients WHERE id=:id AND active=1"),
-        {"id": recipient_id}
+        text("SELECT * FROM alert_recipients WHERE id=:id AND active=1"), {"id": recipient_id}
     )
     row = result.mappings().first()
     if not row:
@@ -349,14 +350,18 @@ async def send_test_alert(
         track_id=999,
         missing_ppe=["hardhat", "gloves"],
         severity="HIGH",
-        timestamp=datetime.now(timezone.utc).isoformat(),
+        timestamp=datetime.now(UTC).isoformat(),
     )
 
     await alert_worker.enqueue(job)
-    
+
     # Log without PII
     redacted_email, redacted_phone = _redact_contact(row.get("email"), row.get("whatsapp_number"))
-    logger.info("Test alert sent to recipient id={} | email={} | phone={}", 
-                recipient_id, redacted_email, redacted_phone)
-    
+    logger.info(
+        "Test alert sent to recipient id={} | email={} | phone={}",
+        recipient_id,
+        redacted_email,
+        redacted_phone,
+    )
+
     return {"status": "test_alert_enqueued", "recipient_id": recipient_id}

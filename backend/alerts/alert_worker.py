@@ -17,17 +17,21 @@ import json
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field
-from typing import List, Optional, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 import cv2
 import numpy as np
 from loguru import logger
-from pydantic import BaseModel, Field, field_validator, model_validator  # FIXED: Pydantic v2 compatibility
+from pydantic import (  # FIXED: Pydantic v2 compatibility
+    BaseModel,
+    Field,
+    field_validator,
+    model_validator,
+)
 
+from .email_sender import send_email_alert
 from .throttle import alert_throttle
 from .whatsapp_sender import send_whatsapp_alert
-from .email_sender import send_email_alert
 
 # ── Config: Load from env with validation ─────────────────────
 _RECIPIENT_REFRESH_S = max(10, int(os.getenv("ALERT_RECIPIENT_REFRESH_SECONDS", "60")))
@@ -37,7 +41,9 @@ _SEND_RETRY_ATTEMPTS = int(os.getenv("ALERT_SEND_RETRY_ATTEMPTS", "3"))
 
 # FIXED: module-level raise → warning + clamp
 if _RECIPIENT_REFRESH_S < 10:
-    logger.warning("ALERT_RECIPIENT_REFRESH_SECONDS too small ({}) — clamping to 10", _RECIPIENT_REFRESH_S)
+    logger.warning(
+        "ALERT_RECIPIENT_REFRESH_SECONDS too small ({}) — clamping to 10", _RECIPIENT_REFRESH_S
+    )
     _RECIPIENT_REFRESH_S = 10
 if _MAX_QUEUE_SIZE < 10:
     logger.warning("ALERT_QUEUE_MAX_SIZE too small ({}) — clamping to 10", _MAX_QUEUE_SIZE)
@@ -48,22 +54,23 @@ if _MAX_QUEUE_SIZE < 10:
 class AlertJob(BaseModel):
     """
     Represents one alert dispatch job.
-    
+
     # FIXED: Validation for all fields
     # IMPROVED: Optional frame_bgr with proper type hint
     """
+
     zone_id: str = Field(..., min_length=1, max_length=100)
     zone_name: str = Field(..., min_length=1, max_length=200)
     zone_type: str = Field(..., pattern="^(danger|restricted|safe|unknown)$")
     track_id: int = Field(..., ge=0)
-    missing_ppe: List[str] = Field(default_factory=list)
+    missing_ppe: list[str] = Field(default_factory=list)
     severity: str = Field(..., pattern="^(CRITICAL|HIGH|MEDIUM|LOW)$")
     timestamp: str = Field(..., min_length=1)  # ISO format expected
-    frame_bgr: Optional[np.ndarray] = Field(default=None, exclude=True)  # Exclude from serialization
-    
+    frame_bgr: np.ndarray | None = Field(default=None, exclude=True)  # Exclude from serialization
+
     class Config:
         arbitrary_types_allowed = True  # For numpy array
-    
+
     @field_validator("missing_ppe", mode="before")
     @classmethod
     def validate_ppe_list(cls, v):
@@ -72,7 +79,7 @@ class AlertJob(BaseModel):
         return [str(item).strip() for item in v if item]
 
     @model_validator(mode="after")
-    def validate_consistency(self) -> "AlertJob":
+    def validate_consistency(self) -> AlertJob:
         if self.severity == "CRITICAL" and not self.missing_ppe:
             logger.warning("CRITICAL alert with no missing_ppe — auto-adding 'unknown'")
             self.missing_ppe = ["unknown"]
@@ -83,13 +90,14 @@ class AlertJob(BaseModel):
 @runtime_checkable
 class DBFactoryProtocol(Protocol):
     """Protocol for async session factory — enables mocking in tests."""
+
     def __call__(self): ...
 
 
 class AlertWorker:
     """
     Background asyncio task that dispatches alerts.
-    
+
     # IMPROVED: Thread pool for blocking cv2 operations
     # FIXED: Proper error handling with retry logic
     # IMPROVED: Metrics collection for monitoring
@@ -97,16 +105,14 @@ class AlertWorker:
 
     def __init__(self, max_queue_size: int = _MAX_QUEUE_SIZE) -> None:
         self._queue: asyncio.Queue[AlertJob] = asyncio.Queue(maxsize=max_queue_size)
-        self._recipients: List[dict] = []
+        self._recipients: list[dict] = []
         self._last_refresh: float = 0.0
-        self._task: Optional[asyncio.Task] = None
-        self._db_factory: Optional[DBFactoryProtocol] = None
+        self._task: asyncio.Task | None = None
+        self._db_factory: DBFactoryProtocol | None = None
         self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="alert_encode")
-        
+
         # Metrics (replace with Prometheus in prod)
-        self._metrics = {
-            "enqueued": 0, "dropped": 0, "sent": 0, "failed": 0, "throttled": 0
-        }
+        self._metrics = {"enqueued": 0, "dropped": 0, "sent": 0, "failed": 0, "throttled": 0}
 
     async def start(self, db_factory: DBFactoryProtocol) -> None:
         """Start the alert worker background task."""
@@ -129,7 +135,7 @@ class AlertWorker:
     async def enqueue(self, job: AlertJob | dict) -> bool:
         """
         Enqueue an alert job. Non-blocking — drops if queue full.
-        
+
         # FIXED: Accept dict or AlertJob, validate/convert if needed
         """
         # Convert dict to AlertJob if needed
@@ -140,7 +146,7 @@ class AlertWorker:
                 logger.error("Invalid alert job: {}", e)
                 self._metrics["dropped"] += 1
                 return False
-        
+
         try:
             self._queue.put_nowait(job)
             self._metrics["enqueued"] += 1
@@ -164,6 +170,7 @@ class AlertWorker:
         if self._db_factory is None:
             return
         from sqlalchemy import text
+
         try:
             async with self._db_factory() as session:
                 result = await session.execute(
@@ -201,20 +208,22 @@ class AlertWorker:
                 return False
         return True
 
-    def _encode_frame_sync(self, frame_bgr: np.ndarray) -> Optional[bytes]:
+    def _encode_frame_sync(self, frame_bgr: np.ndarray) -> bytes | None:
         """
         Encode frame to JPEG bytes — runs in thread pool.
-        
+
         # FIXED: Blocking cv2.imencode moved to sync method for executor
         """
         try:
-            _, buf = cv2.imencode(".jpg", frame_bgr, [cv2.IMWRITE_JPEG_QUALITY, _IMAGE_ENCODE_QUALITY])
+            _, buf = cv2.imencode(
+                ".jpg", frame_bgr, [cv2.IMWRITE_JPEG_QUALITY, _IMAGE_ENCODE_QUALITY]
+            )
             return buf.tobytes()
         except Exception as exc:
             logger.warning("Frame encoding failed: {}", exc)
             return None
 
-    async def _encode_frame_async(self, frame_bgr: Optional[np.ndarray]) -> Optional[bytes]:
+    async def _encode_frame_async(self, frame_bgr: np.ndarray | None) -> bytes | None:
         """Async wrapper for frame encoding."""
         if frame_bgr is None:
             return None
@@ -225,7 +234,7 @@ class AlertWorker:
         self,
         recipient: dict,
         job: AlertJob,
-        image_bytes: Optional[bytes],
+        image_bytes: bytes | None,
     ) -> None:
         """Send alert to one recipient via all their configured channels."""
         r_id = recipient["id"]
@@ -237,14 +246,19 @@ class AlertWorker:
             return
 
         if not alert_throttle.should_send(r_id, zone_id, track_id, severity):
-            logger.debug("Alert throttled | recipient={} | zone={} | severity={}", recipient["name"], zone_id, severity)
+            logger.debug(
+                "Alert throttled | recipient={} | zone={} | severity={}",
+                recipient["name"],
+                zone_id,
+                severity,
+            )
             await self._log_send(r_id, zone_id, track_id, severity, "throttled", None)
             self._metrics["throttled"] += 1
             return
 
         # Dispatch with retry logic
         results = []
-        
+
         # WhatsApp
         if recipient.get("whatsapp_number"):
             success = False
@@ -262,8 +276,10 @@ class AlertWorker:
                 if success:
                     break
                 await asyncio.sleep(0.5 * (attempt + 1))  # Exponential backoff
-            
-            await self._log_send(r_id, zone_id, track_id, severity, "sent" if success else "failed", "whatsapp")
+
+            await self._log_send(
+                r_id, zone_id, track_id, severity, "sent" if success else "failed", "whatsapp"
+            )
             results.append(("whatsapp", success))
 
         # Email
@@ -284,8 +300,10 @@ class AlertWorker:
                 if success:
                     break
                 await asyncio.sleep(0.5 * (attempt + 1))
-            
-            await self._log_send(r_id, zone_id, track_id, severity, "sent" if success else "failed", "email")
+
+            await self._log_send(
+                r_id, zone_id, track_id, severity, "sent" if success else "failed", "email"
+            )
             results.append(("email", success))
 
         # Record send if at least one channel succeeded
@@ -302,14 +320,14 @@ class AlertWorker:
         track_id: int,
         severity: str,
         status: str,
-        alert_type: Optional[str],
+        alert_type: str | None,
     ) -> None:
         """Write send log entry to PostgreSQL."""
         if self._db_factory is None:
             return
         from sqlalchemy import text
         from tenacity import retry, stop_after_attempt, wait_exponential
-        
+
         @retry(stop=stop_after_attempt(2), wait=wait_exponential(multiplier=1, min=0.5, max=2))
         async def _persist():
             async with self._db_factory() as session:
@@ -326,10 +344,10 @@ class AlertWorker:
                         "track_id": track_id,
                         "severity": severity,
                         "status": status,
-                    }
+                    },
                 )
                 await session.commit()
-        
+
         try:
             await _persist()
         except Exception as exc:
@@ -356,16 +374,13 @@ class AlertWorker:
 
                 # Dispatch to all recipients concurrently with return_exceptions
                 await asyncio.gather(
-                    *(
-                        self._dispatch_to_recipient(r, job, image_bytes)
-                        for r in self._recipients
-                    ),
+                    *(self._dispatch_to_recipient(r, job, image_bytes) for r in self._recipients),
                     return_exceptions=True,
                 )
 
                 self._queue.task_done()
 
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
             except asyncio.CancelledError:
                 break
@@ -375,7 +390,7 @@ class AlertWorker:
 
 
 # ── Singleton with lazy initialization ────────────────────────
-_alert_worker_instance: Optional[AlertWorker] = None
+_alert_worker_instance: AlertWorker | None = None
 
 
 def get_alert_worker(max_queue_size: int = _MAX_QUEUE_SIZE) -> AlertWorker:

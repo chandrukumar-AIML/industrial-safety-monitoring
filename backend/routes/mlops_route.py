@@ -12,18 +12,14 @@ MLOps management endpoints: model versions, deployments, canary control.
 
 from __future__ import annotations
 
-from typing import List, Optional
-
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, Field, field_validator
+from loguru import logger
+from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlmodel.ext.asyncio.session import AsyncSession
-from loguru import logger
 
 from ..database import get_session
-from ..mlops.deployment_manager import (
-    start_canary_deployment, promote_canary, rollback_canary
-)
+from ..mlops.deployment_manager import promote_canary, rollback_canary, start_canary_deployment
 from ..mlops.model_registry import list_all_versions
 
 router = APIRouter(prefix="/mlops", tags=["mlops"])
@@ -34,18 +30,18 @@ class DeploymentOut(BaseModel):
     model_name: str
     model_version: str
     stage: str
-    map50: Optional[float]
-    canary_traffic_pct: Optional[float]
-    canary_frames: Optional[int]
-    promoted_at: Optional[str]
-    rolled_back_at: Optional[str]
-    rollback_reason: Optional[str]
-    notes: Optional[str]
+    map50: float | None
+    canary_traffic_pct: float | None
+    canary_frames: int | None
+    promoted_at: str | None
+    rolled_back_at: str | None
+    rollback_reason: str | None
+    notes: str | None
     created_at: str
 
 
 class CanaryStartRequest(BaseModel):
-    canary_version: str = Field(min_length=1, max_length=64, pattern=r'^[a-zA-Z0-9._-]+$')
+    canary_version: str = Field(min_length=1, max_length=64, pattern=r"^[a-zA-Z0-9._-]+$")
     notes: str = Field(default="", max_length=500)
 
 
@@ -59,7 +55,7 @@ async def list_models() -> list:
     return list_all_versions()
 
 
-@router.get("/deployments", response_model=List[DeploymentOut], summary="List deployment history")
+@router.get("/deployments", response_model=list[DeploymentOut], summary="List deployment history")
 async def list_deployments(
     limit: int = Query(default=50, ge=1, le=500),
     session: AsyncSession = Depends(get_session),
@@ -74,7 +70,7 @@ async def list_deployments(
             ORDER BY created_at DESC
             LIMIT :limit
         """),
-        {"limit": limit}
+        {"limit": limit},
     )
     return [
         {
@@ -90,6 +86,7 @@ async def list_deployments(
 @router.get("/canary/status", summary="Current canary routing status")
 async def canary_status() -> dict:
     from ..mlops.canary_router import canary_router
+
     return canary_router.get_status()
 
 
@@ -105,7 +102,7 @@ async def start_canary(body: CanaryStartRequest) -> dict:
     if not dep_id:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
-            f"Failed to start canary for version {body.canary_version}. Ensure it's in Staging."
+            f"Failed to start canary for version {body.canary_version}. Ensure it's in Staging.",
         )
     logger.info("Canary started: v{} -> dep_id={}", body.canary_version, dep_id)
     return {"status": "canary_started", "deployment_id": dep_id}
@@ -115,9 +112,9 @@ async def start_canary(body: CanaryStartRequest) -> dict:
 async def evaluate_now(deployment_id: int) -> dict:
     if deployment_id < 1:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid deployment_id")
-        
-    from ..mlops.canary_evaluator import evaluate_canary
+
     from ..database import AsyncSessionLocal
+    from ..mlops.canary_evaluator import evaluate_canary
 
     result = await evaluate_canary(deployment_id, AsyncSessionLocal)
     return {
@@ -146,7 +143,9 @@ async def promote_canary_endpoint(body: CanaryActionRequest) -> dict:
 async def rollback_canary_endpoint(body: CanaryActionRequest) -> dict:
     from ..database import AsyncSessionLocal
 
-    success = await rollback_canary(body.deployment_id, AsyncSessionLocal, body.reason or "Manual rollback")
+    success = await rollback_canary(
+        body.deployment_id, AsyncSessionLocal, body.reason or "Manual rollback"
+    )
     if not success:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Rollback failed")
     logger.warning("Canary rolled back: dep_id={} | reason={}", body.deployment_id, body.reason)

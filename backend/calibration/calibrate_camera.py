@@ -28,23 +28,19 @@ Tip: Use floor tape, painted lines, or tile corners as reference points.
 from __future__ import annotations
 
 import argparse
-import json
 import pathlib
 import sys
-from typing import List, Optional, Tuple
 
 import cv2
-import numpy as np
 from loguru import logger
 
 # Import from local module
 from .calibrator import (
-    CameraCalibration, 
+    CALIBRATION_PATH,
     CalibrationError,
+    CameraCalibration,
     HomographyComputationError,
     _sanitize_camera_id,
-    _get_calibration_path,
-    CALIBRATION_PATH,
 )
 
 
@@ -56,20 +52,20 @@ class InteractiveCalibrator:
         image_p = pathlib.Path(image_path)
         if not image_p.exists():
             raise FileNotFoundError(f"Image not found: {image_path}")
-        if not image_p.suffix.lower() in {".jpg", ".jpeg", ".png", ".bmp"}:
+        if image_p.suffix.lower() not in {".jpg", ".jpeg", ".png", ".bmp"}:
             logger.warning("Unusual image format: {} — may not load correctly", image_p.suffix)
-        
+
         self._image = cv2.imread(str(image_p))
         if self._image is None:
             raise ValueError(f"Cannot read image: {image_path}")
 
         self._display = self._image.copy()
-        self._points: List[Tuple[int, int, float, float]] = []  # [(px, py, rx, ry), ...]
+        self._points: list[tuple[int, int, float, float]] = []  # [(px, py, rx, ry), ...]
         self._window = "Camera Calibration — Click ground points"
         self._camera_id = _sanitize_camera_id(camera_id)
-        
+
         # Undo history for UX
-        self._undo_stack: List[Tuple[int, int, float, float]] = []
+        self._undo_stack: list[tuple[int, int, float, float]] = []
 
     def _mouse_callback(self, event: int, x: int, y: int, flags, param) -> None:
         """Handle mouse clicks for point selection."""
@@ -78,22 +74,26 @@ class InteractiveCalibrator:
 
         idx = len(self._points) + 1
         print(f"\n[Point {idx}] Clicked at pixel ({x}, {y})")
-        
+
         # Get real-world coords with validation
         while True:
             try:
-                rx_input = input(f"  Enter real-world X in metres (e.g. 0.0): ").strip()
-                ry_input = input(f"  Enter real-world Y in metres (e.g. 2.0): ").strip()
-                
+                rx_input = input("  Enter real-world X in metres (e.g. 0.0): ").strip()
+                ry_input = input("  Enter real-world Y in metres (e.g. 2.0): ").strip()
+
                 rx = float(rx_input)
                 ry = float(ry_input)
-                
+
                 # Warn if values seem suspicious
                 if abs(rx) > 100 or abs(ry) > 100:
-                    confirm = input(f"  ⚠️  Large values ({rx}m, {ry}m) — confirm? (y/n): ").strip().lower()
+                    confirm = (
+                        input(f"  ⚠️  Large values ({rx}m, {ry}m) — confirm? (y/n): ")
+                        .strip()
+                        .lower()
+                    )
                     if confirm != "y":
                         continue
-                
+
                 break
             except ValueError:
                 print("  ❌ Invalid number — please enter numeric values")
@@ -119,7 +119,10 @@ class InteractiveCalibrator:
             f"P{idx} ({rx:.2f}m, {ry:.2f}m)",
             (x + 10, y - 10),
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.5, (0, 255, 0), 1, cv2.LINE_AA,
+            0.5,
+            (0, 255, 0),
+            1,
+            cv2.LINE_AA,
         )
 
     def _undo_last(self) -> bool:
@@ -127,20 +130,20 @@ class InteractiveCalibrator:
         if not self._points:
             print("  No points to undo")
             return False
-        
+
         removed = self._undo_stack.pop()
         self._points.remove(removed)
         self._display = self._image.copy()
-        
+
         # Redraw remaining points
         for i, (x, y, rx, ry) in enumerate(self._points, 1):
             self._draw_point(i, x, y, rx, ry)
-        
+
         cv2.imshow(self._window, self._display)
         print(f"  ↩ Undone point {len(self._points) + 1}")
         return True
 
-    def run(self) -> List[Tuple[int, int, float, float]]:
+    def run(self) -> list[tuple[int, int, float, float]]:
         """
         Show interactive window for point selection.
         Returns list of (px, py, rx, ry) tuples.
@@ -189,37 +192,39 @@ class InteractiveCalibrator:
         if len(self._points) < 4:
             print("  ⚠️  Need at least 4 points to verify")
             return
-        
+
         print("\n[Preview] Computing homography...")
         try:
             pixel_pts = [(p[0], p[1]) for p in self._points]
             real_pts = [(p[2], p[3]) for p in self._points]
-            
+
             cal = CameraCalibration.from_point_pairs(
                 pixel_points=pixel_pts,
                 real_world_points=real_pts,
                 camera_id=self._camera_id,
             )
-            
+
             # Show verification
             print("\n[Preview] Verification results:")
             result = cal.verify()
             print(f"  • Mean error: {result.get('mean_error_m', 'N/A'):.3f}m")
             print(f"  • Max error: {result.get('max_error_m', 'N/A'):.3f}m")
             print(f"  • Status: {'✓ PASS' if result.get('pass') else '✗ FAIL'}")
-            
-            if result.get('pass'):
+
+            if result.get("pass"):
                 print("  ✓ Calibration looks good — press 'q' to save")
             else:
                 print("  ⚠️  Consider re-clicking points for better accuracy")
-                
+
         except HomographyComputationError as e:
             print(f"  ✗ Homography failed: {e}")
         except Exception as e:
             print(f"  ✗ Verification error: {e}")
 
 
-def calibrate(image_path: str, camera_id: str = "default", output_path: Optional[str] = None) -> CameraCalibration:
+def calibrate(
+    image_path: str, camera_id: str = "default", output_path: str | None = None
+) -> CameraCalibration:
     """
     Run interactive calibration and save result.
 
@@ -232,9 +237,9 @@ def calibrate(image_path: str, camera_id: str = "default", output_path: Optional
         CameraCalibration instance.
     """
     camera_id_safe = _sanitize_camera_id(camera_id)
-    
+
     print(f"\n🎯 Starting calibration for camera: {camera_id_safe}")
-    
+
     calibrator = InteractiveCalibrator(image_path, camera_id_safe)
     points = calibrator.run()
 
@@ -265,8 +270,8 @@ def calibrate(image_path: str, camera_id: str = "default", output_path: Optional
     result = cal.verify()
     print(f"Mean error: {result['mean_error_m']:.3f}m")
     print(f"Max error: {result['max_error_m']:.3f}m")
-    
-    if not result['pass']:
+
+    if not result["pass"]:
         print("\n⚠️  Calibration accuracy below threshold")
         confirm = input("  Save anyway? (y/n): ").strip().lower()
         if confirm != "y":
@@ -284,13 +289,13 @@ def calibrate(image_path: str, camera_id: str = "default", output_path: Optional
         sys.exit(1)
 
     # Final summary
-    print(f"\n✅ Calibration complete!")
+    print("\n✅ Calibration complete!")
     print(f"   Saved to: {CALIBRATION_PATH}")
     print(f"   Pixels per metre: ~{cal.pixels_per_meter:.1f}")
     print(f"   Validated: {cal.validated}")
-    print(f"\n🔧 The pipeline will use this calibration automatically.")
-    print(f"   To recalibrate: re-run this script with a new frame.")
-    
+    print("\n🔧 The pipeline will use this calibration automatically.")
+    print("   To recalibrate: re-run this script with a new frame.")
+
     return cal
 
 
@@ -312,28 +317,32 @@ Tips:
         """,
     )
     parser.add_argument(
-        "--image", "-i",
+        "--image",
+        "-i",
         required=True,
         help="Path to calibration frame (jpg/png/bmp)",
     )
     parser.add_argument(
-        "--camera-id", "-c",
+        "--camera-id",
+        "-c",
         default="default",
         help="Camera identifier (alphanumeric + dash/underscore)",
     )
     parser.add_argument(
-        "--output", "-o",
+        "--output",
+        "-o",
         default=None,
         help="Optional custom output path for calibration JSON",
     )
     parser.add_argument(
-        "--verbose", "-v",
+        "--verbose",
+        "-v",
         action="store_true",
         help="Enable debug logging",
     )
-    
+
     args = parser.parse_args()
-    
+
     # Configure logging
     logger.remove()
     logger.add(
@@ -341,7 +350,7 @@ Tips:
         level="DEBUG" if args.verbose else "INFO",
         format="<green>{time:HH:mm:ss}</green> | <level>{level}</level> | {message}",
     )
-    
+
     try:
         calibrate(
             image_path=args.image,

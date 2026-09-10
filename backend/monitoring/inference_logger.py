@@ -17,13 +17,13 @@ flushes to DB at midnight or on explicit flush() call.
 
 from __future__ import annotations
 
-import os
 import asyncio
 import json
+import os
 import time
 from collections import defaultdict
-from datetime import date, datetime, timezone
-from typing import Dict, List, Optional, Any, Protocol, runtime_checkable
+from datetime import date
+from typing import Protocol, runtime_checkable
 
 import numpy as np
 from loguru import logger
@@ -45,15 +45,17 @@ if FLUSH_INTERVAL_S < 60:
 @runtime_checkable
 class DBFactoryProtocol(Protocol):
     """Protocol for async session factory — enables mocking in tests."""
+
     def __call__(self): ...
 
 
 # ── Pydantic models for structured validation ─────────────────
 class LoggerConfig(BaseModel):
     """Validated configuration for inference logger."""
+
     max_accumulation_size: int = Field(default=MAX_ACCUMULATION_SIZE, ge=1000)
     flush_interval_s: float = Field(default=FLUSH_INTERVAL_S, ge=60)
-    
+
     @field_validator("flush_interval_s")
     @classmethod
     def warn_on_short_interval(cls, v):
@@ -66,27 +68,27 @@ class DailyStatsAccumulator:
     """
     Accumulates inference stats in memory throughout the day.
     Thread-safe via asyncio — single-coroutine access from event writer.
-    
+
     # IMPROVED: Memory-efficient accumulation with bounded buffers
     # IMPROVED: Configurable flush intervals + backpressure handling
     """
-    
-    def __init__(self, config: Optional[LoggerConfig] = None) -> None:
+
+    def __init__(self, config: LoggerConfig | None = None) -> None:
         self._config = config or LoggerConfig()
         self._lock = asyncio.Lock()
         self.reset()
-    
+
     def reset(self) -> None:
         """Reset accumulator state for new day."""
         self._date = date.today()
         self._total_frames = 0
         self._total_detections = 0
-        self._confidences: List[float] = []
-        self._class_counts: Dict[str, int] = defaultdict(int)
+        self._confidences: list[float] = []
+        self._class_counts: dict[str, int] = defaultdict(int)
         self._frames_with_det = 0
         self._last_flush = time.monotonic()
         self._accumulated_bytes = 0
-    
+
     async def record_frame(
         self,
         detections: list,  # list of TrackedDetection
@@ -97,33 +99,33 @@ class DailyStatsAccumulator:
             if date.today() != self._date:
                 logger.info("Date rolled over — resetting accumulator")
                 self.reset()
-            
+
             self._total_frames += 1
-            
+
             if not detections:
                 return
-            
+
             self._frames_with_det += 1
             self._total_detections += len(detections)
-            
+
             # Accumulate confidences with size limit
             for det in detections:
                 if len(self._confidences) < self._config.max_accumulation_size:
                     self._confidences.append(round(det.confidence, 3))
                 self._class_counts[det.class_name] += 1
-            
+
             # Estimate memory usage
             self._accumulated_bytes = (
-                len(self._confidences) * 8 +  # 8 bytes per float
-                sum(len(k) + 8 for k in self._class_counts.keys())  # approx dict overhead
+                len(self._confidences) * 8  # 8 bytes per float
+                + sum(len(k) + 8 for k in self._class_counts.keys())  # approx dict overhead
             )
-    
+
     async def get_summary(self) -> dict:
         """Build summary dict for DB insert."""
         async with self._lock:
             confs = np.array(self._confidences) if self._confidences else np.array([0.0])
             total = self._total_detections or 1  # avoid division by zero
-            
+
             return {
                 "stat_date": self._date.isoformat(),
                 "total_frames": self._total_frames,
@@ -135,19 +137,20 @@ class DailyStatsAccumulator:
                 "conf_p50": round(float(np.percentile(confs, 50)), 4),
                 "conf_p75": round(float(np.percentile(confs, 75)), 4),
                 "conf_p95": round(float(np.percentile(confs, 95)), 4),
-                "class_distribution": json.dumps({
-                    k: round(v / total, 4)
-                    for k, v in self._class_counts.items()
-                }),
-                "violation_rates": json.dumps({
-                    k: round(v / total, 4)
-                    for k, v in self._class_counts.items()
-                    if k.startswith("no ")
-                }),
+                "class_distribution": json.dumps(
+                    {k: round(v / total, 4) for k, v in self._class_counts.items()}
+                ),
+                "violation_rates": json.dumps(
+                    {
+                        k: round(v / total, 4)
+                        for k, v in self._class_counts.items()
+                        if k.startswith("no ")
+                    }
+                ),
                 "accumulated_bytes": self._accumulated_bytes,
                 "sample_count": len(self._confidences),
             }
-    
+
     async def should_flush(self) -> bool:
         """True if the date has rolled over or flush interval exceeded."""
         async with self._lock:
@@ -155,22 +158,22 @@ class DailyStatsAccumulator:
             date_changed = date.today() != self._date
             interval_exceeded = (now - self._last_flush) > self._config.flush_interval_s
             return date_changed or interval_exceeded
-    
+
     async def mark_flushed(self) -> None:
         """Mark that a flush has occurred."""
         async with self._lock:
             self._last_flush = time.monotonic()
-    
+
     @property
     async def current_date(self) -> date:
         async with self._lock:
             return self._date
-    
+
     @property
     async def sample_count(self) -> int:
         async with self._lock:
             return len(self._confidences)
-    
+
     @property
     async def accumulated_bytes(self) -> int:
         async with self._lock:
@@ -184,12 +187,12 @@ async def flush_stats_to_db(
     """
     Write daily stats summary to PostgreSQL.
     Uses INSERT ... ON CONFLICT DO UPDATE so re-runs are idempotent.
-    
+
     # FIXED: Parameterized queries only — no SQL injection
     # IMPROVED: Error handling with retry logic
     """
     from sqlalchemy import text
-    
+
     async with db_factory() as session:
         try:
             await session.execute(
@@ -233,7 +236,7 @@ async def flush_stats_to_db(
 
 
 # ── Singleton accumulator ─────────────────────────────────────
-_stats_accumulator_instance: Optional[DailyStatsAccumulator] = None
+_stats_accumulator_instance: DailyStatsAccumulator | None = None
 
 
 def get_stats_accumulator(**kwargs) -> DailyStatsAccumulator:

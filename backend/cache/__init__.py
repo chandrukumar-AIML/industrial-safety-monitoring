@@ -20,26 +20,28 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     # Type hints only — no runtime import cost
-    from .redis_cache import RedisCache, RedisCacheContext, RedisClientProtocol
-    from .redis_cache import CacheError, CacheConnectionError, CacheSerializationError
+    from .redis_cache import (
+        CacheConnectionError,
+        CacheError,
+        CacheSerializationError,
+        RedisCache,
+        RedisCacheContext,
+        RedisClientProtocol,
+    )
 
 # ── Explicit public API ──────────────────────────────────────
 __all__ = [
     # Core classes
     "RedisCache",
     "RedisCacheContext",
-    
     # Singleton instance (lazy-initialized)
     "redis_cache",
-    
     # Exceptions
     "CacheError",
-    "CacheConnectionError", 
+    "CacheConnectionError",
     "CacheSerializationError",
-    
     # Protocol for testing
     "RedisClientProtocol",
-    
     # Config helpers
     "get_cache_config",
     "validate_cache_config",
@@ -54,9 +56,15 @@ __description__ = "Redis cache layer for Industrial Safety Monitor"
 def get_cache_config() -> dict:
     """Return current cache configuration (for diagnostics)."""
     from .redis_cache import (
-        REDIS_URL, CACHE_NAMESPACE, REDIS_POOL_SIZE,
-        ZONE_TTL, EMBEDDING_TTL, CANARY_TTL, DEDUP_TTL,
+        CACHE_NAMESPACE,
+        CANARY_TTL,
+        DEDUP_TTL,
+        EMBEDDING_TTL,
+        REDIS_POOL_SIZE,
+        REDIS_URL,
+        ZONE_TTL,
     )
+
     return {
         "redis_url": REDIS_URL,
         "namespace": CACHE_NAMESPACE,
@@ -76,35 +84,38 @@ def validate_cache_config() -> list[str]:
     Returns list of warnings (empty = OK).
     """
     warnings = []
-    
+
     # Check if Redis URL looks valid
     redis_url = os.getenv("REDIS_URL", "")
     if redis_url and not redis_url.startswith(("redis://", "rediss://", "unix://")):
         warnings.append(f"REDIS_URL may be invalid: {redis_url[:20]}...")
-    
+
     # Warn if using default localhost in production
     if "localhost" in redis_url and os.getenv("ENVIRONMENT") == "production":
         warnings.append("Using localhost Redis in production — consider managed Redis")
-    
+
     return warnings
 
 
 # ── Lazy loader for heavy imports ────────────────────────────
 def __getattr__(name: str) -> Any:
     """Lazy-load submodules only when accessed."""
-    
+
     if name in ("RedisCache", "RedisCacheContext", "redis_cache"):
         from . import redis_cache as module
+
         return getattr(module, name)
-    
+
     if name in ("CacheError", "CacheConnectionError", "CacheSerializationError"):
         from . import redis_cache as module
+
         return getattr(module, name)
-    
+
     if name == "RedisClientProtocol":
         from . import redis_cache as module
+
         return getattr(module, name)
-    
+
     raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
 
@@ -112,5 +123,6 @@ def __getattr__(name: str) -> Any:
 _cache_warnings = validate_cache_config()
 if _cache_warnings and os.getenv("CACHE_STRICT_MODE", "false").lower() == "true":
     import warnings as _warnings
+
     for w in _cache_warnings:
         _warnings.warn(f"Cache config: {w}", RuntimeWarning, stacklevel=2)

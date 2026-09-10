@@ -24,15 +24,15 @@ Usage in routes:
             select(ViolationEvent).where(ViolationEvent.org_id == org_id)
         )
 """
+
 from __future__ import annotations
 
 import os
-from typing import Optional
 
-from fastapi import Request, HTTPException
+from fastapi import HTTPException, Request
+from loguru import logger
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
-from loguru import logger
 
 # In single-tenant mode (no X-Org-ID header), use this default
 DEFAULT_ORG_ID = os.getenv("DEFAULT_ORG_ID", "default")
@@ -65,7 +65,8 @@ class TenantMiddleware(BaseHTTPMiddleware):
 
         # Sanitize: only allow alphanumeric, hyphens, underscores
         import re
-        if not re.fullmatch(r'[a-zA-Z0-9_\-]+', org_id):
+
+        if not re.fullmatch(r"[a-zA-Z0-9_\-]+", org_id):
             logger.warning("X-Org-ID contains invalid chars: {}", org_id[:32])
             org_id = DEFAULT_ORG_ID
 

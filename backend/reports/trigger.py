@@ -19,15 +19,15 @@ from __future__ import annotations
 import asyncio
 import os
 import pathlib
-import re
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Any, Protocol, runtime_checkable
+from datetime import UTC, datetime, timedelta
+from typing import Any, Protocol, runtime_checkable
 
 from loguru import logger
 from pydantic import BaseModel, Field  # FIXED: removed stale v1 validator import
+
 
 # ── Config: Load from env with validation ─────────────────────
 def _validate_positive_int(name: str, value: str, default: int, min_val: int, max_val: int) -> int:
@@ -40,23 +40,30 @@ def _validate_positive_int(name: str, value: str, default: int, min_val: int, ma
         logger.warning("{} invalid: {} — using default {}", name, value, default)
         return default
 
-DEBOUNCE_MINUTES = _validate_positive_int("REPORT_DEBOUNCE_MINUTES", os.getenv("REPORT_DEBOUNCE_MINUTES", "480"), 480, 60, 1440)  # 1h to 24h
-MAX_QUEUE_SIZE = _validate_positive_int("REPORT_MAX_QUEUE_SIZE", os.getenv("REPORT_MAX_QUEUE_SIZE", "50"), 50, 10, 500)
+
+DEBOUNCE_MINUTES = _validate_positive_int(
+    "REPORT_DEBOUNCE_MINUTES", os.getenv("REPORT_DEBOUNCE_MINUTES", "480"), 480, 60, 1440
+)  # 1h to 24h
+MAX_QUEUE_SIZE = _validate_positive_int(
+    "REPORT_MAX_QUEUE_SIZE", os.getenv("REPORT_MAX_QUEUE_SIZE", "50"), 50, 10, 500
+)
 
 
 # ── Protocol for dependency injection ─────────────────────────
 @runtime_checkable
 class DBFactoryProtocol(Protocol):
     """Protocol for async session factory — enables mocking in tests."""
+
     def __call__(self): ...
 
 
 # ── Pydantic models for structured validation ─────────────────
 class DebouncerConfig(BaseModel):
     """Validated configuration for report debouncer."""
+
     debounce_minutes: int = Field(default=DEBOUNCE_MINUTES, ge=60, le=1440)
     max_queue_size: int = Field(default=MAX_QUEUE_SIZE, ge=10, le=500)
-    
+
     @property
     def debounce_timedelta(self) -> timedelta:
         return timedelta(minutes=self.debounce_minutes)
@@ -65,6 +72,7 @@ class DebouncerConfig(BaseModel):
 @dataclass
 class ReportJob:
     """A queued report generation job."""
+
     violation_id: int
     track_id: int
     class_name: str
@@ -75,7 +83,7 @@ class ReportJob:
     prior_count: int
     zone_description: str
     queued_at: float = field(default_factory=time.monotonic)
-    
+
     def __post_init__(self):
         # Validate fields
         if self.violation_id < 0 or self.track_id < 0 or self.frame_idx < 0:
@@ -90,28 +98,26 @@ class ReportDebouncer:
     """
     Prevents duplicate reports for same track_id + class_name
     within DEBOUNCE_MINUTES.
-    
+
     # FIXED: Thread-safe state management via asyncio
     # IMPROVED: Memory-efficient deque with bounded size
     # IMPROVED: Dependency injection for testability
     # FIXED: No PII leakage in logs
-    
+
     Thread-safe via asyncio — all access from the event writer
     coroutine, no threading needed.
     """
 
-    def __init__(self, config: Optional[DebouncerConfig] = None) -> None:
+    def __init__(self, config: DebouncerConfig | None = None) -> None:
         self._config = config or DebouncerConfig()
         # Key: (track_id, class_name) → last report timestamp
-        self._last_reported: Dict[tuple, datetime] = {}
+        self._last_reported: dict[tuple, datetime] = {}
         # Key: track_id → count of violations this shift
-        self._shift_counts: Dict[int, Dict[str, int]] = defaultdict(
-            lambda: defaultdict(int)
-        )
+        self._shift_counts: dict[int, dict[str, int]] = defaultdict(lambda: defaultdict(int))
         self._queue: asyncio.Queue[ReportJob] = asyncio.Queue(maxsize=self._config.max_queue_size)
-        self._worker_task: Optional[asyncio.Task] = None
+        self._worker_task: asyncio.Task | None = None
         self._lock = asyncio.Lock()
-        
+
         # Stats
         self._total_enqueued = 0
         self._total_debounced = 0
@@ -120,7 +126,8 @@ class ReportDebouncer:
 
         logger.info(
             "ReportDebouncer initialized | debounce={}min | queue_max={}",
-            self._config.debounce_minutes, self._config.max_queue_size,
+            self._config.debounce_minutes,
+            self._config.max_queue_size,
         )
 
     def should_report(self, track_id: int, class_name: str) -> bool:
@@ -132,12 +139,12 @@ class ReportDebouncer:
         last = self._last_reported.get(key)
         if last is None:
             return True
-        return datetime.now(timezone.utc) - last > self._config.debounce_timedelta
+        return datetime.now(UTC) - last > self._config.debounce_timedelta
 
     def record_report(self, track_id: int, class_name: str) -> None:
         """Mark this combo as reported now."""
         key = (track_id, class_name)
-        self._last_reported[key] = datetime.now(timezone.utc)
+        self._last_reported[key] = datetime.now(UTC)
         self._shift_counts[track_id][class_name] += 1
 
     def get_prior_count(self, track_id: int, class_name: str) -> int:
@@ -157,9 +164,9 @@ class ReportDebouncer:
     ) -> bool:
         """
         Enqueue a report generation job if debounce allows.
-        
+
         # FIXED: Input validation + sanitization
-        
+
         Returns True if enqueued, False if debounced or queue full.
         """
         # Validate inputs
@@ -175,11 +182,9 @@ class ReportDebouncer:
             logger.debug("Invalid class_name — dropping report")
             self._total_dropped += 1
             return False
-        
+
         if not self.should_report(track_id, class_name):
-            logger.debug(
-                "Report debounced | track={} class={}", track_id, class_name
-            )
+            logger.debug("Report debounced | track={} class={}", track_id, class_name)
             self._total_debounced += 1
             return False
 
@@ -189,7 +194,7 @@ class ReportDebouncer:
             return False
 
         self.record_report(track_id, class_name)
-        
+
         # Create validated job
         job = ReportJob(
             violation_id=violation_id,
@@ -208,7 +213,9 @@ class ReportDebouncer:
 
         logger.info(
             "Report enqueued | track={} | class={} | queue_size={}",
-            track_id, class_name, self._queue.qsize(),
+            track_id,
+            class_name,
+            self._queue.qsize(),
         )
         return True
 
@@ -230,7 +237,10 @@ class ReportDebouncer:
                 pass
         logger.info(
             "Report worker stopped | enqueued={} | debounced={} | dropped={} | errors={}",
-            self._total_enqueued, self._total_debounced, self._total_dropped, self._errors,
+            self._total_enqueued,
+            self._total_debounced,
+            self._total_dropped,
+            self._errors,
         )
 
     async def _worker_loop(self, db_factory: DBFactoryProtocol) -> None:
@@ -256,12 +266,14 @@ class ReportDebouncer:
         """Process one report generation job."""
         logger.info(
             "Processing report | track={} | class={}",
-            job.track_id, job.class_name,
+            job.track_id,
+            job.class_name,
         )
 
         try:
             # Generate LLM report
             from .generator import generate_report
+
             report = await generate_report(
                 track_id=job.track_id,
                 class_name=job.class_name,
@@ -275,6 +287,7 @@ class ReportDebouncer:
 
             # Save to DB first to get report_id
             from sqlalchemy import text
+
             async with db_factory() as session:
                 result = await session.execute(
                     text("""
@@ -307,13 +320,14 @@ class ReportDebouncer:
                         "severity_level": report.severity_level,
                         "model_used": report.model_used,
                         "generation_ms": report.generation_ms,
-                    }
+                    },
                 )
                 report_id = result.scalar()
                 await session.commit()
 
             # Build PDF (CPU-bound — run in executor)
             from .pdf_builder import build_pdf
+
             loop = asyncio.get_running_loop()
             pdf_path = await loop.run_in_executor(
                 None,
@@ -340,23 +354,26 @@ class ReportDebouncer:
                         "pdf_path": str(pdf_path),
                         "pdf_size": pdf_path.stat().st_size,
                         "id": report_id,
-                    }
+                    },
                 )
                 await session.commit()
 
             logger.info(
                 "Report complete | id={} | pdf={}",
-                report_id, _redact_path(str(pdf_path)),
+                report_id,
+                _redact_path(str(pdf_path)),
             )
 
         except Exception as exc:
             logger.exception(
                 "Report generation failed | track={} | class={}: {}",
-                job.track_id, job.class_name, type(exc).__name__,
+                job.track_id,
+                job.class_name,
+                type(exc).__name__,
             )
             self._errors += 1
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Return debouncer statistics for monitoring."""
         return {
             "queue_size": self._queue.qsize(),
@@ -374,7 +391,7 @@ class ReportDebouncer:
 
 
 # ── Singleton with lazy initialization ───────────────────────
-_report_debouncer_instance: Optional[ReportDebouncer] = None
+_report_debouncer_instance: ReportDebouncer | None = None
 
 
 def get_report_debouncer(**kwargs) -> ReportDebouncer:

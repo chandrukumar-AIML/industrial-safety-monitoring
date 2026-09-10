@@ -34,29 +34,24 @@ __all__ = [
     "FaceRecognizer",
     "WorkerProfile",
     "WorkerRegistry",
-    
     # Data classes
     "WorkerMatch",
     "RiskLevel",
     "PrivacyMode",
-    
     # Functions
     "compute_worker_risk",
     "update_all_risk_scores",
     "enroll_worker",
     "identify_worker",
-    
     # Singletons
     "face_blurrer",
     "face_recognizer",
     "worker_registry",
-    
     # Exceptions
     "IdentityError",
     "PrivacyViolationError",
     "EnrollmentError",
     "RecognitionError",
-    
     # Config helpers
     "get_identity_config",
     "validate_identity_config",
@@ -71,9 +66,9 @@ __description__ = "Worker identity, face privacy & risk scoring for Industrial S
 def get_identity_config() -> dict:
     """Return current identity system configuration."""
     from .face_blurrer import _DEFAULT_BLUR_KERNEL, _DEFAULT_FACE_CONFIDENCE
-    from .face_recognizer import FACE_MODEL, DIST_THRESHOLD, RECOGNITION_ON
-    from .risk_scorer import HIGH_THRESHOLD, CRITICAL_THRESHOLD, HR_COOLDOWN_HOURS
-    
+    from .face_recognizer import DIST_THRESHOLD, FACE_MODEL, RECOGNITION_ON
+    from .risk_scorer import CRITICAL_THRESHOLD, HIGH_THRESHOLD, HR_COOLDOWN_HOURS
+
     return {
         "privacy": {
             "blur_kernel": _DEFAULT_BLUR_KERNEL,
@@ -100,19 +95,19 @@ def validate_identity_config() -> list[str]:
     Returns list of warnings (empty = OK).
     """
     warnings = []
-    
+
     # GDPR mode validation
     gdpr_mode = os.getenv("GDPR_MODE", "strict").lower()
     if gdpr_mode not in ("strict", "relaxed", "disabled"):
         warnings.append(f"Invalid GDPR_MODE: {gdpr_mode} — using 'strict'")
-    
+
     # Face recognition dependencies
     if os.getenv("FACE_RECOGNITION_ENABLED", "true").lower() == "true":
         try:
             import deepface  # noqa: F401
         except ImportError:
             warnings.append("DeepFace not installed — face recognition will be disabled")
-    
+
     # Threshold validation
     try:
         dist_thresh = float(os.getenv("FACE_DISTANCE_THRESHOLD", "0.50"))
@@ -120,7 +115,7 @@ def validate_identity_config() -> list[str]:
             warnings.append(f"FACE_DISTANCE_THRESHOLD={dist_thresh} outside 0-1 range")
     except ValueError:
         warnings.append("FACE_DISTANCE_THRESHOLD must be a float")
-    
+
     # Risk thresholds
     try:
         high = float(os.getenv("RISK_SCORE_HIGH_THRESHOLD", "15.0"))
@@ -129,42 +124,49 @@ def validate_identity_config() -> list[str]:
             warnings.append(f"CRITICAL_THRESHOLD ({critical}) must be > HIGH_THRESHOLD ({high})")
     except ValueError:
         warnings.append("Risk thresholds must be numeric")
-    
+
     return warnings
 
 
 # ── Lazy loader for heavy imports ────────────────────────────
 def __getattr__(name: str) -> Any:
     """Lazy-load submodules only when accessed."""
-    
+
     if name in ("FaceBlurrer", "face_blurrer"):
         from . import face_blurrer as module
+
         return getattr(module, name)
-    
+
     if name in ("FaceRecognizer", "WorkerMatch", "face_recognizer"):
         from . import face_recognizer as module
+
         return getattr(module, name)
-    
+
     if name in ("WorkerProfile", "WorkerRegistry", "worker_registry"):
         from . import worker_registry as module
+
         return getattr(module, name)
-    
+
     if name in ("RiskLevel", "compute_worker_risk", "update_all_risk_scores"):
         from . import risk_scorer as module
+
         return getattr(module, name)
-    
+
     if name in ("PrivacyMode",):
         from . import worker_registry as module
+
         return getattr(module, name)
-    
+
     if name in ("IdentityError", "PrivacyViolationError", "EnrollmentError", "RecognitionError"):
         from . import worker_registry as module
+
         return getattr(module, name)
-    
+
     if name in ("enroll_worker", "identify_worker"):
         from . import face_recognizer as module
+
         return getattr(module, name)
-    
+
     raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
 
@@ -172,6 +174,7 @@ def __getattr__(name: str) -> Any:
 _identity_warnings = validate_identity_config()
 if _identity_warnings and os.getenv("IDENTITY_STRICT_MODE", "false").lower() == "true":
     import warnings as _warnings
+
     for w in _identity_warnings:
         _warnings.warn(f"Identity config: {w}", RuntimeWarning, stacklevel=2)
 
@@ -186,7 +189,7 @@ async def enroll_worker(
     """Convenience: enroll worker face + save to DB."""
     from .face_recognizer import face_recognizer
     from .worker_registry import upsert_worker_profile
-    
+
     embedding_bytes = face_recognizer.enroll_from_image(image_bgr, worker_id, worker_name)
     if embedding_bytes:
         await upsert_worker_profile(
@@ -206,24 +209,27 @@ async def identify_worker(
 ) -> list:
     """Convenience: identify workers + enrich with profile data."""
     from .face_recognizer import face_recognizer
-    
+
     matches = face_recognizer.identify(frame_bgr, **kwargs)
-    
+
     # Optional: enrich with profile data from DB
     if db_factory and matches:
         from .worker_registry import get_worker_profile
+
         enriched = []
         for match in matches:
             profile = await get_worker_profile(match.worker_id, db_factory)
             if profile:
-                enriched.append({
-                    **match.__dict__,
-                    "department": profile.department,
-                    "role": profile.role,
-                    "risk_level": profile.risk_level,
-                })
+                enriched.append(
+                    {
+                        **match.__dict__,
+                        "department": profile.department,
+                        "role": profile.role,
+                        "risk_level": profile.risk_level,
+                    }
+                )
             else:
                 enriched.append(match.__dict__)
         return enriched
-    
+
     return [m.__dict__ for m in matches]

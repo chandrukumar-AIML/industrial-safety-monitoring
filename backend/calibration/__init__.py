@@ -18,27 +18,23 @@ Public API for camera calibration utilities.
 
 from __future__ import annotations
 
-import os
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from .calibrator import CameraCalibration
     from .calibrate_camera import calibrate as calibrate_camera
+    from .calibrator import CameraCalibration
 
 # ── Explicit public API ──────────────────────────────────────
 __all__ = [
     # Core classes
     "CameraCalibration",
-    
     # Functions
     "calibrate_camera",
     "pixel_distance",
-    
     # Exceptions
     "CalibrationError",
     "CalibrationNotFoundError",
     "CalibrationValidationError",
-    
     # Config
     "get_calibration_config",
     "CALIBRATION_PATH",
@@ -53,23 +49,27 @@ __description__ = "Camera calibration utilities for pixel→metre conversion"
 # ── Re-export constants from calibrator ───────────────────────
 def __getattr__(name: str) -> Any:
     """Lazy-load to avoid cv2/numpy import on package load."""
-    
+
     if name in ("CameraCalibration", "CALIBRATION_PATH", "CRITICAL_M", "WARNING_M"):
         from . import calibrator
+
         return getattr(calibrator, name)
-    
+
     if name in ("calibrate_camera",):
         from . import calibrate_camera
+
         return getattr(calibrate_camera, name)
-    
+
     if name == "pixel_distance":
         from . import calibrator
+
         return getattr(calibrator, name)
-    
+
     if name in ("CalibrationError", "CalibrationNotFoundError", "CalibrationValidationError"):
         from . import calibrator
+
         return getattr(calibrator, name)
-    
+
     raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
 
@@ -77,6 +77,7 @@ def __getattr__(name: str) -> Any:
 def get_calibration_config() -> dict:
     """Return current calibration configuration."""
     from .calibrator import CALIBRATION_PATH, CRITICAL_M, WARNING_M
+
     return {
         "calibration_path": str(CALIBRATION_PATH),
         "proximity_thresholds": {

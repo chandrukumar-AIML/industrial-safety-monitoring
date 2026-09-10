@@ -13,21 +13,25 @@ Zone-based alert logic.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set, Tuple, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import cv2
 import numpy as np
 from loguru import logger
-from pydantic import BaseModel, Field, field_validator, model_validator  # FIXED: Pydantic v2 compatibility
+from pydantic import (  # FIXED: Pydantic v2 compatibility
+    BaseModel,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 if TYPE_CHECKING:
-    from inference.detector import TrackedDetection  # Type hint only
+    pass  # Type hint only
 
 
 # ── Config: Load from env with validation ─────────────────────
@@ -42,13 +46,20 @@ def _env_float(name: str, raw: str, default: float, lo: float, hi: float) -> flo
         return default
     return val
 
+
 _DEFAULT_DWELL_THRESHOLD_S = _env_float(
     "ZONE_ALERT_DWELL_THRESHOLD_SECONDS",
-    os.getenv("ZONE_ALERT_DWELL_THRESHOLD_SECONDS", "5.0"), 5.0, 0.5, 60.0,
+    os.getenv("ZONE_ALERT_DWELL_THRESHOLD_SECONDS", "5.0"),
+    5.0,
+    0.5,
+    60.0,
 )
 _PROXIMITY_MULTIPLIER = _env_float(
     "ZONE_ALERT_PROXIMITY_MULTIPLIER",
-    os.getenv("ZONE_ALERT_PROXIMITY_MULTIPLIER", "1.2"), 1.2, 0.5, 3.0,
+    os.getenv("ZONE_ALERT_PROXIMITY_MULTIPLIER", "1.2"),
+    1.2,
+    0.5,
+    3.0,
 )
 
 
@@ -58,15 +69,18 @@ class ZoneDefinition(BaseModel):
     Zone loaded from PostgreSQL.
     Polygon stored as normalised [0,1] coords relative to frame size.
     """
+
     zone_id: str = Field(..., min_length=1, max_length=100)
     zone_name: str = Field(..., min_length=1, max_length=200)
     zone_type: str = Field(..., pattern="^(danger|restricted|safe|unknown)$")
-    polygon_norm: List[List[float]] = Field(..., min_length=3)  # FIXED: min_items → min_length (Pydantic v2) | [[x,y], ...] normalised
-    required_ppe: List[str] = Field(default_factory=list)
+    polygon_norm: list[list[float]] = Field(
+        ..., min_length=3
+    )  # FIXED: min_items → min_length (Pydantic v2) | [[x,y], ...] normalised
+    required_ppe: list[str] = Field(default_factory=list)
     alert_enabled: bool = True
     dwell_threshold_s: float = Field(default=_DEFAULT_DWELL_THRESHOLD_S, ge=0.5, le=60)
     color_hex: str = Field(default="#FF0000", pattern="^#[0-9A-Fa-f]{6}$")
-    
+
     @field_validator("polygon_norm")
     @classmethod
     def validate_polygon_coords(cls, v):
@@ -79,12 +93,13 @@ class ZoneDefinition(BaseModel):
         return v
 
     @model_validator(mode="after")
-    def validate_consistency(self) -> "ZoneDefinition":
+    def validate_consistency(self) -> ZoneDefinition:
         # Danger/restricted zones should require PPE
         if self.zone_type in ("danger", "restricted") and not self.required_ppe:
             logger.warning(
                 "Zone {} ({}) has no required_ppe — alerts may be ineffective",
-                self.zone_id, self.zone_name,
+                self.zone_id,
+                self.zone_name,
             )
         return self
 
@@ -93,15 +108,16 @@ class ZoneDefinition(BaseModel):
 @dataclass
 class ZoneAlert:
     """A zone-triggered PPE violation alert."""
+
     zone_id: str
     zone_name: str
     zone_type: str
     track_id: int
-    missing_ppe: List[str]
+    missing_ppe: list[str]
     severity: str
     timestamp: float = field(default_factory=time.time)
     frame_idx: int = 0
-    
+
     def to_dict(self) -> dict:
         """Convert to dict for JSON serialization."""
         return {
@@ -119,7 +135,7 @@ class ZoneAlert:
 class ZoneAlertEngine:
     """
     Evaluates every tracked detection against all active zones.
-    
+
     # FIXED: Thread-safe via asyncio (single-threaded event loop)
     # IMPROVED: Spatial indexing hint for large detection lists
     # FIXED: Debounce with atomic timestamp updates
@@ -130,16 +146,16 @@ class ZoneAlertEngine:
         default_dwell_threshold: float = _DEFAULT_DWELL_THRESHOLD_S,
         proximity_multiplier: float = _PROXIMITY_MULTIPLIER,
     ) -> None:
-        self._zones: Dict[str, ZoneDefinition] = {}
+        self._zones: dict[str, ZoneDefinition] = {}
         # Debounce: (track_id, zone_id) → last alert timestamp (monotonic)
-        self._last_alert: Dict[Tuple[int, str], float] = defaultdict(float)
+        self._last_alert: dict[tuple[int, str], float] = defaultdict(float)
         # Track which track_ids are currently inside which zones
-        self._track_zones: Dict[int, Set[str]] = defaultdict(set)
-        
+        self._track_zones: dict[int, set[str]] = defaultdict(set)
+
         # Config (injectable for testing)
         self._default_dwell_threshold = default_dwell_threshold
         self._proximity_multiplier = proximity_multiplier
-        
+
         # Metrics
         self._metrics = {
             "evaluations": 0,
@@ -147,17 +163,18 @@ class ZoneAlertEngine:
             "alerts_throttled": 0,
             "zones_loaded": 0,
         }
-        
+
         logger.info(
             "ZoneAlertEngine initialised | dwell_threshold={}s | proximity_mult={}",
-            default_dwell_threshold, proximity_multiplier,
+            default_dwell_threshold,
+            proximity_multiplier,
         )
 
     async def load_zones_from_db(self, db_factory) -> int:
         """
         Load all active zones from PostgreSQL.
         Call at startup and after any zone update via API.
-        
+
         # FIXED: Validate polygon format before accepting
         """
         from sqlalchemy import text
@@ -180,7 +197,7 @@ class ZoneAlertEngine:
             try:
                 polygon = json.loads(row["polygon_norm"])
                 required_ppe = json.loads(row["required_ppe"]) if row["required_ppe"] else []
-                
+
                 # Validate via Pydantic
                 zone = ZoneDefinition(
                     zone_id=row["zone_id"],
@@ -194,11 +211,12 @@ class ZoneAlertEngine:
                 )
                 self._zones[zone.zone_id] = zone
                 loaded += 1
-                
+
             except Exception as e:
                 logger.error(
                     "Failed to load zone {}: {} — skipping",
-                    row["zone_id"], e,
+                    row["zone_id"],
+                    e,
                 )
                 continue
 
@@ -225,9 +243,11 @@ class ZoneAlertEngine:
 
     def _point_in_polygon(
         self,
-        cx: float, cy: float,
-        polygon_norm: List[List[float]],
-        frame_w: int, frame_h: int,
+        cx: float,
+        cy: float,
+        polygon_norm: list[list[float]],
+        frame_w: int,
+        frame_h: int,
     ) -> bool:
         """
         Test if point (cx, cy) in pixels is inside the normalised polygon.
@@ -249,22 +269,20 @@ class ZoneAlertEngine:
         self,
         track_id: int,
         all_detections: list,  # List[TrackedDetection]
-    ) -> Set[str]:
+    ) -> set[str]:
         """
         Get the set of PPE classes currently detected for this track_id.
-        
+
         # IMPROVED: Early bbox overlap check to skip expensive distance calc
         """
-        worker_det = next(
-            (d for d in all_detections if d.track_id == track_id), None
-        )
+        worker_det = next((d for d in all_detections if d.track_id == track_id), None)
         if not worker_det:
             return set()
 
         wx1, wy1, wx2, wy2 = worker_det.bbox_xyxy
         w_cx = (wx1 + wx2) / 2
         w_cy = (wy1 + wy2) / 2
-        w_area_diag = ((wx2-wx1)**2 + (wy2-wy1)**2) ** 0.5
+        w_area_diag = ((wx2 - wx1) ** 2 + (wy2 - wy1) ** 2) ** 0.5
         proximity = w_area_diag * self._proximity_multiplier
 
         worn_ppe = set()
@@ -273,18 +291,26 @@ class ZoneAlertEngine:
             if det.class_name.startswith("no "):
                 continue
             # Skip if not a PPE item
-            if det.class_name not in ("hardhat", "gloves", "goggles", "boots", "mask", "suit", "person"):
+            if det.class_name not in (
+                "hardhat",
+                "gloves",
+                "goggles",
+                "boots",
+                "mask",
+                "suit",
+                "person",
+            ):
                 continue
-                
+
             # Quick bbox overlap check before distance calc
             d_x1, d_y1, d_x2, d_y2 = det.bbox_xyxy
             if not (wx1 < d_x2 and d_x1 < wx2 and wy1 < d_y2 and d_y1 < wy2):
                 continue  # No overlap — skip expensive distance calc
-            
+
             # Check centroid proximity to worker
             d_cx = (d_x1 + d_x2) / 2
             d_cy = (d_y1 + d_y2) / 2
-            dist = ((d_cx - w_cx)**2 + (d_cy - w_cy)**2) ** 0.5
+            dist = ((d_cx - w_cx) ** 2 + (d_cy - w_cy) ** 2) ** 0.5
             if dist <= proximity:
                 worn_ppe.add(det.class_name)
 
@@ -293,7 +319,7 @@ class ZoneAlertEngine:
     def _compute_severity(
         self,
         zone_type: str,
-        missing_ppe: List[str],
+        missing_ppe: list[str],
     ) -> str:
         """Map zone type + missing PPE count to alert severity."""
         if zone_type == "danger":
@@ -309,19 +335,19 @@ class ZoneAlertEngine:
         all_detections: list,  # List[TrackedDetection]
         frame_wh: tuple,
         frame_idx: int = 0,
-    ) -> List[ZoneAlert]:
+    ) -> list[ZoneAlert]:
         """
         Evaluate all tracked detections against all active zones.
-        
+
         # FIXED: Atomic debounce timestamp update to prevent race conditions
         """
         self._metrics["evaluations"] += 1
-        
+
         if not self._zones or not all_detections:
             return []
 
         frame_w, frame_h = frame_wh
-        alerts: List[ZoneAlert] = []
+        alerts: list[ZoneAlert] = []
         now = time.monotonic()
 
         for det in all_detections:
@@ -335,9 +361,7 @@ class ZoneAlertEngine:
                 if zone.zone_type == "safe":
                     continue  # no alerts in safe zones
 
-                in_zone = self._point_in_polygon(
-                    cx, cy, zone.polygon_norm, frame_w, frame_h
-                )
+                in_zone = self._point_in_polygon(cx, cy, zone.polygon_norm, frame_w, frame_h)
 
                 if not in_zone:
                     self._track_zones[det.track_id].discard(zone_id)
@@ -350,18 +374,24 @@ class ZoneAlertEngine:
                     continue
 
                 # Only alert if this is a person-level detection
-                if not (det.is_violation or
-                        det.class_name in ("person", "hardhat",
-                                           "no hardhat", "no gloves",
-                                           "no goggles", "no boots",
-                                           "no mask", "no suit")):
+                if not (
+                    det.is_violation
+                    or det.class_name
+                    in (
+                        "person",
+                        "hardhat",
+                        "no hardhat",
+                        "no gloves",
+                        "no goggles",
+                        "no boots",
+                        "no mask",
+                        "no suit",
+                    )
+                ):
                     continue
 
                 worn_ppe = self._get_worker_ppe(det.track_id, all_detections)
-                missing_ppe = [
-                    ppe for ppe in zone.required_ppe
-                    if ppe not in worn_ppe
-                ]
+                missing_ppe = [ppe for ppe in zone.required_ppe if ppe not in worn_ppe]
 
                 if not missing_ppe:
                     continue  # worker is compliant — no alert
@@ -369,7 +399,7 @@ class ZoneAlertEngine:
                 # Debounce check — atomic timestamp comparison
                 debounce_key = (det.track_id, zone_id)
                 dwell_threshold = zone.dwell_threshold_s or self._default_dwell_threshold
-                
+
                 # Use monotonic time for debounce to avoid clock skew issues
                 last_alert = self._last_alert.get(debounce_key, 0)
                 if now - last_alert < dwell_threshold:
@@ -398,12 +428,15 @@ class ZoneAlertEngine:
 
                 logger.warning(
                     "ZONE ALERT | zone={} | track={} | missing={} | severity={}",
-                    zone_id, det.track_id, missing_ppe, severity,
+                    zone_id,
+                    det.track_id,
+                    missing_ppe,
+                    severity,
                 )
 
         return alerts
 
-    def get_zone_overlay_data(self, frame_wh: tuple) -> List[dict]:
+    def get_zone_overlay_data(self, frame_wh: tuple) -> list[dict]:
         """
         Returns zone polygon data in pixel coords for OpenCV annotation.
         Called from pipeline._annotate() to draw zones on the video frame.
@@ -411,17 +444,16 @@ class ZoneAlertEngine:
         fw, fh = frame_wh
         overlays = []
         for zone in self._zones.values():
-            poly_px = [
-                [int(p[0] * fw), int(p[1] * fh)]
-                for p in zone.polygon_norm
-            ]
-            overlays.append({
-                "zone_id": zone.zone_id,
-                "zone_name": zone.zone_name,
-                "zone_type": zone.zone_type,
-                "polygon": poly_px,
-                "color_hex": zone.color_hex,
-            })
+            poly_px = [[int(p[0] * fw), int(p[1] * fh)] for p in zone.polygon_norm]
+            overlays.append(
+                {
+                    "zone_id": zone.zone_id,
+                    "zone_name": zone.zone_name,
+                    "zone_type": zone.zone_type,
+                    "polygon": poly_px,
+                    "color_hex": zone.color_hex,
+                }
+            )
         return overlays
 
     def get_metrics(self) -> dict:
@@ -446,7 +478,7 @@ class ZoneAlertEngine:
 
 
 # ── Singleton with lazy initialization ───────────────────────
-_zone_alert_engine_instance: Optional[ZoneAlertEngine] = None
+_zone_alert_engine_instance: ZoneAlertEngine | None = None
 
 
 def get_zone_alert_engine(**kwargs) -> ZoneAlertEngine:

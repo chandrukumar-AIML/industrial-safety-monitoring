@@ -8,23 +8,22 @@ Sends Slack notifications on all outcomes.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import pathlib
 import shutil
-from loguru import logger
 
 import httpx
+from loguru import logger
 
-SLACK_WEBHOOK         = os.getenv("RETRAIN_NOTIFY_SLACK_WEBHOOK", "")
-MIN_MAP_IMPROVEMENT   = float(os.getenv("NEW_MODEL_MIN_MAP_IMPROVEMENT", "0.01"))
+SLACK_WEBHOOK = os.getenv("RETRAIN_NOTIFY_SLACK_WEBHOOK", "")
+MIN_MAP_IMPROVEMENT = float(os.getenv("NEW_MODEL_MIN_MAP_IMPROVEMENT", "0.01"))
 
 # FIXED: Relative paths resolve wrong inside Docker — use env-var-based absolute paths
 _MODELS_DIR = pathlib.Path(os.getenv("MODELS_DIR", "models")).resolve()
 PRODUCTION_MODEL_PATH = _MODELS_DIR / "best.pt"
-STAGING_MODEL_PATH    = _MODELS_DIR / "candidate.pt"
-BACKUP_MODEL_PATH     = _MODELS_DIR / "best_backup.pt"
+STAGING_MODEL_PATH = _MODELS_DIR / "candidate.pt"
+BACKUP_MODEL_PATH = _MODELS_DIR / "best_backup.pt"
 
 
 async def notify_slack(message: str) -> None:
@@ -76,15 +75,19 @@ async def evaluate_and_promote(candidate_summary_path: str) -> dict:
     Returns:
         Promotion result dict.
     """
-    current_map   = get_current_map()
+    current_map = get_current_map()
     candidate_map = get_candidate_map(candidate_summary_path)
-    improvement   = candidate_map - current_map
-    promoted      = improvement >= MIN_MAP_IMPROVEMENT
+    improvement = candidate_map - current_map
+    promoted = improvement >= MIN_MAP_IMPROVEMENT
 
     logger.info(
         "Model comparison | current mAP={:.4f} | candidate mAP={:.4f} "
         "| improvement={:+.4f} | threshold={} | promoted={}",
-        current_map, candidate_map, improvement, MIN_MAP_IMPROVEMENT, promoted,
+        current_map,
+        candidate_map,
+        improvement,
+        MIN_MAP_IMPROVEMENT,
+        promoted,
     )
 
     if promoted:
@@ -124,9 +127,9 @@ async def evaluate_and_promote(candidate_summary_path: str) -> dict:
         )
 
     return {
-        "promoted"      : promoted,
-        "current_map"   : current_map,
-        "candidate_map" : candidate_map,
-        "improvement"   : round(improvement, 4),
-        "threshold"     : MIN_MAP_IMPROVEMENT,
+        "promoted": promoted,
+        "current_map": current_map,
+        "candidate_map": candidate_map,
+        "improvement": round(improvement, 4),
+        "threshold": MIN_MAP_IMPROVEMENT,
     }

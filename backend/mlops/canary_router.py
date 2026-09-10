@@ -29,18 +29,20 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import os
-import re
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from enum import Enum, auto
-from typing import Optional, Dict, Any
+from datetime import UTC, datetime
+from enum import Enum
+from typing import Any
 
 from loguru import logger
 from pydantic import BaseModel, Field, field_validator  # FIXED: Pydantic v2 compatibility
 
+
 # ── Config: Load from env with validation ─────────────────────
-def _validate_float_range(name: str, value: str, default: float, min_val: float, max_val: float) -> float:
+def _validate_float_range(
+    name: str, value: str, default: float, min_val: float, max_val: float
+) -> float:
     try:
         val = float(value)
         if not min_val <= val <= max_val:
@@ -50,7 +52,10 @@ def _validate_float_range(name: str, value: str, default: float, min_val: float,
         logger.warning("{} invalid: {} — using default {}", name, value, default)
         return default
 
-CANARY_PCT = _validate_float_range("CANARY_TRAFFIC_PCT", os.getenv("CANARY_TRAFFIC_PCT", "10"), 10, 0, 100)
+
+CANARY_PCT = _validate_float_range(
+    "CANARY_TRAFFIC_PCT", os.getenv("CANARY_TRAFFIC_PCT", "10"), 10, 0, 100
+)
 CANARY_MIN_FRAMES = int(os.getenv("CANARY_MIN_FRAMES", "1000"))
 if CANARY_MIN_FRAMES < 100:
     logger.warning("CANARY_MIN_FRAMES too small — using 1000")
@@ -71,10 +76,11 @@ class ModelVariant(str, Enum):
 # ── Pydantic models for structured validation ─────────────────
 class RoutingConfig(BaseModel):
     """Validated configuration for canary routing."""
+
     canary_pct: float = Field(default=CANARY_PCT, ge=0, le=100)
     min_frames: int = Field(default=CANARY_MIN_FRAMES, ge=100)
     hash_salt: str = Field(default=CANARY_HASH_SALT, min_length=1)
-    
+
     @field_validator("hash_salt")
     @classmethod
     def warn_on_default_salt(cls, v):
@@ -86,20 +92,21 @@ class RoutingConfig(BaseModel):
 @dataclass
 class RoutingDecision:
     """Result of routing one frame."""
+
     variant: ModelVariant
     track_id: int
     hash_value: int
-    deployment_id: Optional[int]
-    routed_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-    
+    deployment_id: int | None
+    routed_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
+
     def __post_init__(self):
         # Validate fields
         if self.track_id < 0:
             raise ValueError(f"track_id cannot be negative: {self.track_id}")
         if self.hash_value < 0 or self.hash_value > 99:
             raise ValueError(f"hash_value must be 0-99: {self.hash_value}")
-    
-    def to_dict(self) -> Dict[str, Any]:
+
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dict for JSON serialization."""
         return {
             "variant": self.variant.value,
@@ -113,25 +120,26 @@ class RoutingDecision:
 @dataclass
 class CanaryState:
     """Current canary deployment state."""
+
     active: bool = False
-    deployment_id: Optional[int] = None
-    canary_version: Optional[str] = None
-    production_version: Optional[str] = None
+    deployment_id: int | None = None
+    canary_version: str | None = None
+    production_version: str | None = None
     canary_pct: float = CANARY_PCT
     canary_frames: int = 0
     prod_frames: int = 0
     start_time: float = field(default_factory=time.monotonic)
-    
+
     @property
     def total_frames(self) -> int:
         return self.canary_frames + self.prod_frames
-    
+
     @property
     def is_evaluation_ready(self) -> bool:
         """True if enough canary frames collected for evaluation."""
         return self.canary_frames >= CANARY_MIN_FRAMES
-    
-    def to_dict(self) -> Dict[str, Any]:
+
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dict for JSON serialization."""
         return {
             "active": self.active,
@@ -151,12 +159,12 @@ class CanaryState:
 class CanaryRouter:
     """
     Hash-based canary traffic router.
-    
+
     # FIXED: Thread-safe state management via asyncio
     # IMPROVED: Hash function with salt for security
     # FIXED: Input validation + sanitization
     # IMPROVED: Dependency injection for testability
-    
+
     Thread-safe — all state mutation protected by simple flag.
     Called from pipeline hot loop — must be < 0.1ms overhead.
 
@@ -174,15 +182,16 @@ class CanaryRouter:
 
     def __init__(
         self,
-        config: Optional[RoutingConfig] = None,
+        config: RoutingConfig | None = None,
     ) -> None:
         self._config = config or RoutingConfig()
         self._state = CanaryState()
         self._lock = asyncio.Lock()  # For thread-safe state updates
-        
+
         logger.info(
             "CanaryRouter ready | pct={} | min_frames={} | salt={}",
-            self._config.canary_pct, self._config.min_frames,
+            self._config.canary_pct,
+            self._config.min_frames,
             "***" if self._config.hash_salt != "default_salt_change_me" else "default",
         )
 
@@ -191,11 +200,11 @@ class CanaryRouter:
         canary_version: str,
         production_version: str,
         deployment_id: int,
-        canary_pct: Optional[float] = None,
+        canary_pct: float | None = None,
     ) -> None:
         """
         Activate canary routing for a new deployment.
-        
+
         # FIXED: Input validation + sanitization
         """
         # Validate inputs
@@ -205,9 +214,9 @@ class CanaryRouter:
             raise ValueError("Version strings cannot be empty")
         if canary_pct is not None and not 0 <= canary_pct <= 100:
             raise ValueError(f"canary_pct must be 0-100: {canary_pct}")
-        
+
         pct = canary_pct if canary_pct is not None else self._config.canary_pct
-        
+
         self._state = CanaryState(
             active=True,
             deployment_id=deployment_id,
@@ -217,7 +226,10 @@ class CanaryRouter:
         )
         logger.info(
             "Canary started | v{} → {}% traffic | prod=v{} | dep_id={}",
-            canary_version, pct, production_version, deployment_id,
+            canary_version,
+            pct,
+            production_version,
+            deployment_id,
         )
 
     def stop_canary(self) -> None:
@@ -229,7 +241,7 @@ class CanaryRouter:
     def route(self, track_id: int) -> RoutingDecision:
         """
         Determine which model variant to use for this track_id.
-        
+
         # IMPROVED: Hash function with salt for security
         # FIXED: Input validation
         """
@@ -241,7 +253,7 @@ class CanaryRouter:
                 hash_value=0,
                 deployment_id=None,
             )
-        
+
         if not self._state.active:
             return RoutingDecision(
                 variant=ModelVariant.PRODUCTION,
@@ -249,20 +261,16 @@ class CanaryRouter:
                 hash_value=0,
                 deployment_id=None,
             )
-        
+
         # Stable hash with salt — same track_id always routes the same way
         # FIXED: MD5 → SHA-256 (MD5 is weak; SHA-256 is crypto-safe)
         hash_input = f"{track_id}:{self._config.hash_salt}"
-        hash_val = int(hashlib.sha256(
-            hash_input.encode()
-        ).hexdigest(), 16) % 100
-        
+        hash_val = int(hashlib.sha256(hash_input.encode()).hexdigest(), 16) % 100
+
         variant = (
-            ModelVariant.CANARY
-            if hash_val < self._state.canary_pct
-            else ModelVariant.PRODUCTION
+            ModelVariant.CANARY if hash_val < self._state.canary_pct else ModelVariant.PRODUCTION
         )
-        
+
         return RoutingDecision(
             variant=variant,
             track_id=track_id,
@@ -281,11 +289,11 @@ class CanaryRouter:
             else:
                 self._state.prod_frames += 1
 
-    def get_status(self) -> Dict[str, Any]:
+    def get_status(self) -> dict[str, Any]:
         """Current canary routing status."""
         return self._state.to_dict()
 
-    def get_diagnostics(self) -> Dict[str, Any]:
+    def get_diagnostics(self) -> dict[str, Any]:
         """Return router status for health checks."""
         return {
             "active": self._state.active,
@@ -294,7 +302,9 @@ class CanaryRouter:
             "prod_frames": self._state.prod_frames,
             "total_frames": self._state.total_frames,
             "evaluation_ready": self._state.is_evaluation_ready,
-            "uptime_seconds": time.monotonic() - self._state.start_time if self._state.active else 0,
+            "uptime_seconds": time.monotonic() - self._state.start_time
+            if self._state.active
+            else 0,
             "config": {
                 "min_frames": self._config.min_frames,
                 "hash_salt_set": self._config.hash_salt != "default_salt_change_me",
@@ -303,7 +313,7 @@ class CanaryRouter:
 
 
 # ── Singleton with lazy initialization ───────────────────────
-_canary_router_instance: Optional[CanaryRouter] = None
+_canary_router_instance: CanaryRouter | None = None
 
 
 def get_canary_router(**kwargs) -> CanaryRouter:

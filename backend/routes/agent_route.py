@@ -21,14 +21,13 @@ import os
 import re
 import time
 from collections import defaultdict
-from datetime import datetime, timezone
-from typing import List, Optional
+from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from loguru import logger
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import text
 from sqlmodel.ext.asyncio.session import AsyncSession
-from loguru import logger
 
 from ..database import get_session
 
@@ -45,7 +44,7 @@ def _check_rate_limit(client_ip: str) -> None:
     now = time.monotonic()
     window = _rate_store.get(client_ip, [])
     _rate_store[client_ip] = [t for t in window if now - t < _RATE_LIMIT_WINDOW_S]
-    
+
     if len(_rate_store[client_ip]) >= _RATE_LIMIT_MAX:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -59,30 +58,30 @@ def _check_rate_limit(client_ip: str) -> None:
 class AgentRunOut(BaseModel):
     id: int
     run_id: str
-    track_id: Optional[int]
-    class_name: Optional[str]
-    severity_score: Optional[int]
-    alert_level: Optional[str]
-    report_id: Optional[int]
+    track_id: int | None
+    class_name: str | None
+    severity_score: int | None
+    alert_level: str | None
+    report_id: int | None
     alert_sent: bool
-    compliance_delta: Optional[float]
-    final_status: Optional[str]
-    error: Optional[str]
+    compliance_delta: float | None
+    final_status: str | None
+    error: str | None
     created_at: str
-    trace_steps: Optional[List[dict]] = None
+    trace_steps: list[dict] | None = None
 
 
 class ManualTriggerRequest(BaseModel):
     track_id: int = Field(ge=0)
     class_name: str = Field(min_length=1, max_length=100)
     confidence: float = Field(ge=0.0, le=1.0, default=0.85)
-    zone_id: Optional[str] = Field(default=None, max_length=100)
+    zone_id: str | None = Field(default=None, max_length=100)
     frame_idx: int = Field(default=0, ge=0)
-    
+
     @field_validator("class_name")
     @classmethod
     def validate_class_name(cls, v: str) -> str:
-        if not re.match(r'^[a-zA-Z0-9\s\-]+$', v):
+        if not re.match(r"^[a-zA-Z0-9\s\-]+$", v):
             raise ValueError("class_name contains invalid characters")
         return v.strip()
 
@@ -98,7 +97,7 @@ class AgentStatusOut(BaseModel):
 # ── Endpoints ─────────────────────────────────────────────────
 @router.get(
     "/runs",
-    response_model=List[AgentRunOut],
+    response_model=list[AgentRunOut],
     summary="List recent agent runs",
 )
 async def list_agent_runs(
@@ -116,7 +115,7 @@ async def list_agent_runs(
             ORDER BY created_at DESC
             LIMIT :limit
         """),
-        {"limit": limit}
+        {"limit": limit},
     )
     return [
         {
@@ -139,12 +138,11 @@ async def get_agent_run(
 ) -> dict:
     """Get one agent run including full trace_steps audit log."""
     # Validate run_id format
-    if not re.match(r'^[a-zA-Z0-9\-]+$', run_id):
+    if not re.match(r"^[a-zA-Z0-9\-]+$", run_id):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid run_id format")
-    
+
     result = await session.execute(
-        text("SELECT * FROM agent_runs WHERE run_id = :run_id"),
-        {"run_id": run_id}
+        text("SELECT * FROM agent_runs WHERE run_id = :run_id"), {"run_id": run_id}
     )
     row = result.mappings().first()
     if not row:
@@ -174,7 +172,7 @@ async def manual_trigger(
     # Rate limit check
     client_ip = request.client.host if request.client else "unknown"
     _check_rate_limit(client_ip)
-    
+
     # Import here to avoid circular dependency
     from ..agent.runner import trigger_from_violation
 
@@ -186,14 +184,17 @@ async def manual_trigger(
             confidence=body.confidence,
             zone_id=body.zone_id,
             frame_idx=body.frame_idx,
-            timestamp=datetime.now(timezone.utc).isoformat(),
+            timestamp=datetime.now(UTC).isoformat(),
         )
-        import asyncio, inspect
+        import inspect
+
         if inspect.isawaitable(result):
             await result
     except Exception as exc:
         logger.error("trigger_from_violation failed: {}", exc)
-        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f"Agent trigger failed: {type(exc).__name__}")
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR, f"Agent trigger failed: {type(exc).__name__}"
+        )
 
     return {
         "status": "triggered",

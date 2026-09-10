@@ -13,13 +13,11 @@ Lists worker-machine proximity violations detected by the pipeline.
 
 from __future__ import annotations
 
-from typing import Optional
-
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, Field
+from loguru import logger
+from pydantic import BaseModel
 from sqlalchemy import text
 from sqlmodel.ext.asyncio.session import AsyncSession
-from loguru import logger
 
 from ..database import get_session
 
@@ -28,19 +26,21 @@ router = APIRouter(prefix="/proximity-alerts", tags=["proximity"])
 
 # ── Response models ───────────────────────────────────────────
 
+
 class ProximityAlertOut(BaseModel):
     """
     Single proximity alert record.
     Matches the 'proximity_alerts' table schema.
     """
+
     id: int
     person_track_id: int
     machine_track_id: int
     machine_class: str
     pixel_distance: float
-    real_distance_m: Optional[float]
+    real_distance_m: float | None
     alert_level: str
-    zone_id: Optional[str]
+    zone_id: str | None
     frame_idx: int
     timestamp: str
     acknowledged: bool
@@ -50,14 +50,16 @@ class ProximityStatsOut(BaseModel):
     """
     Aggregated statistics for the proximity dashboard.
     """
+
     total_alerts: int
     critical_alerts: int
     warning_alerts: int
-    most_common_machine: Optional[str]
-    avg_distance_m: Optional[float]
+    most_common_machine: str | None
+    avg_distance_m: float | None
 
 
 # ── Endpoints ─────────────────────────────────────────────────
+
 
 @router.get(
     "",
@@ -67,7 +69,7 @@ class ProximityStatsOut(BaseModel):
 )
 async def list_proximity_alerts(
     limit: int = Query(50, ge=1, le=500, description="Max results (1-500)"),
-    acknowledged: Optional[bool] = Query(None, description="Filter by acknowledged status"),
+    acknowledged: bool | None = Query(None, description="Filter by acknowledged status"),
     session: AsyncSession = Depends(get_session),
 ) -> list[ProximityAlertOut]:
     """
@@ -100,19 +102,21 @@ async def list_proximity_alerts(
         # Convert to Pydantic models (handles datetime serialization automatically)
         output = []
         for row in rows:
-            output.append(ProximityAlertOut(
-                id=row["id"],
-                person_track_id=row["person_track_id"],
-                machine_track_id=row["machine_track_id"],
-                machine_class=row["machine_class"],
-                pixel_distance=row["pixel_distance"],
-                real_distance_m=row["real_distance_m"],
-                alert_level=row["alert_level"],
-                zone_id=row["zone_id"],
-                frame_idx=row["frame_idx"],
-                timestamp=str(row["timestamp"]),  # Ensure ISO string
-                acknowledged=row["acknowledged"],
-            ))
+            output.append(
+                ProximityAlertOut(
+                    id=row["id"],
+                    person_track_id=row["person_track_id"],
+                    machine_track_id=row["machine_track_id"],
+                    machine_class=row["machine_class"],
+                    pixel_distance=row["pixel_distance"],
+                    real_distance_m=row["real_distance_m"],
+                    alert_level=row["alert_level"],
+                    zone_id=row["zone_id"],
+                    frame_idx=row["frame_idx"],
+                    timestamp=str(row["timestamp"]),  # Ensure ISO string
+                    acknowledged=row["acknowledged"],
+                )
+            )
         return output
 
     except Exception as e:
@@ -130,7 +134,7 @@ async def proximity_stats(
     session: AsyncSession = Depends(get_session),
 ) -> ProximityStatsOut:
     """Calculate real-time proximity statistics."""
-    
+
     # 1. Total counts by severity
     counts_query = text("""
         SELECT

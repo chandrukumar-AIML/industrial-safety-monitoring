@@ -22,17 +22,17 @@ from fastapi import APIRouter, HTTPException, status
 from loguru import logger
 
 from ..demo.synthetic_data import (
-    is_demo_mode,
-    generate_violation_event,
-    generate_worker_profiles,
-    generate_zone_definitions,
     generate_camera_list,
-    generate_dashboard_stats,
-    generate_violation_history,
     generate_compliance_by_class,
-    generate_weekly_report_summary,
+    generate_dashboard_stats,
     generate_fire_alert,
     generate_pose_hazards,
+    generate_violation_event,
+    generate_violation_history,
+    generate_weekly_report_summary,
+    generate_worker_profiles,
+    generate_zone_definitions,
+    is_demo_mode,
 )
 
 router = APIRouter(prefix="/demo", tags=["demo"])

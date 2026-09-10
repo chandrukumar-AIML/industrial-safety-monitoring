@@ -12,20 +12,18 @@ Violation listing, live detection fallback, and acknowledgment endpoints.
 
 from __future__ import annotations
 
-from typing import List, Optional
-
-from fastapi import APIRouter, Depends, Query, HTTPException, Path, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
+from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
-from loguru import logger
-from pydantic import BaseModel, Field
 
 from ..database import get_session
-from ..models import ViolationEvent, ViolationEventOut, ViolationAcknowledge, DetectionOut
+from ..models import DetectionOut, ViolationAcknowledge, ViolationEvent, ViolationEventOut
 from ..state import app_state
 
 router = APIRouter(prefix="/detections", tags=["detections"])
+
 
 # ── Typed response models ─────────────────────────────────────
 class AcknowledgeResponse(BaseModel):
@@ -44,17 +42,17 @@ class ViolationStatsOut(BaseModel):
 # ── Endpoints ─────────────────────────────────────────────────
 @router.get(
     "",
-    response_model=List[ViolationEventOut],
+    response_model=list[ViolationEventOut],
     summary="List violation events",
 )
 async def list_violations(
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
-    zone_id: Optional[str] = Query(None, max_length=100),
-    class_name: Optional[str] = Query(None, max_length=100),
-    acknowledged: Optional[bool] = Query(None, description="Filter by status"),
+    zone_id: str | None = Query(None, max_length=100),
+    class_name: str | None = Query(None, max_length=100),
+    acknowledged: bool | None = Query(None, description="Filter by status"),
     session: AsyncSession = Depends(get_session),
-) -> List[ViolationEvent]:
+) -> list[ViolationEvent]:
     stmt = select(ViolationEvent).order_by(ViolationEvent.timestamp.desc())
     if zone_id:
         stmt = stmt.where(ViolationEvent.zone_id == zone_id)
@@ -70,11 +68,11 @@ async def list_violations(
 
 @router.get(
     "/live",
-    response_model=List[DetectionOut],
+    response_model=list[DetectionOut],
     responses={204: {"description": "No frame processed yet"}},
     summary="Live detections",
 )
-async def live_detections() -> List[DetectionOut]:
+async def live_detections() -> list[DetectionOut]:
     frame = app_state.get_latest_frame()
     if frame is None:
         return []
@@ -134,8 +132,9 @@ async def violation_stats(
         select(func.count(ViolationEvent.id)).where(ViolationEvent.acknowledged.is_(False))
     )
     class_res = await session.exec(
-        select(ViolationEvent.class_name, func.count(ViolationEvent.id).label("count"))
-        .group_by(ViolationEvent.class_name)
+        select(ViolationEvent.class_name, func.count(ViolationEvent.id).label("count")).group_by(
+            ViolationEvent.class_name
+        )
     )
     zone_res = await session.exec(
         select(ViolationEvent.zone_id, func.count(ViolationEvent.id).label("count"))

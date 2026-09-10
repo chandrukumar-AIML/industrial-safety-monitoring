@@ -26,15 +26,14 @@ from __future__ import annotations
 
 import asyncio
 import os
-import re
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Dict, List, Optional, Any, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from loguru import logger
 from pydantic import BaseModel, Field  # FIXED: removed stale v1 validator import
+
 
 # ── Config: Load from env with validation ─────────────────────
 def _validate_positive_int(name: str, value: str, default: int, min_val: int, max_val: int) -> int:
@@ -47,7 +46,10 @@ def _validate_positive_int(name: str, value: str, default: int, min_val: int, ma
         logger.warning("{} invalid: {} — using default {}", name, value, default)
         return default
 
-def _validate_positive_float(name: str, value: str, default: float, min_val: float, max_val: float) -> float:
+
+def _validate_positive_float(
+    name: str, value: str, default: float, min_val: float, max_val: float
+) -> float:
     try:
         val = float(value)
         if not min_val <= val <= max_val:
@@ -57,37 +59,48 @@ def _validate_positive_float(name: str, value: str, default: float, min_val: flo
         logger.warning("{} invalid: {} — using default {}", name, value, default)
         return default
 
-BATCH_INTERVAL_S = _validate_positive_float("BATCH_WRITE_INTERVAL_S", os.getenv("BATCH_WRITE_INTERVAL_S", "30"), 30, 1, 300)
-BATCH_MAX_SIZE = _validate_positive_int("BATCH_WRITE_MAX_SIZE", os.getenv("BATCH_WRITE_MAX_SIZE", "500"), 500, 100, 5000)
+
+BATCH_INTERVAL_S = _validate_positive_float(
+    "BATCH_WRITE_INTERVAL_S", os.getenv("BATCH_WRITE_INTERVAL_S", "30"), 30, 1, 300
+)
+BATCH_MAX_SIZE = _validate_positive_int(
+    "BATCH_WRITE_MAX_SIZE", os.getenv("BATCH_WRITE_MAX_SIZE", "500"), 500, 100, 5000
+)
 BUFFER_OVERFLOW_FACTOR = float(os.getenv("BATCH_BUFFER_OVERFLOW_FACTOR", "2.0"))
 if BUFFER_OVERFLOW_FACTOR < 1.5 or BUFFER_OVERFLOW_FACTOR > 5.0:
     logger.warning("BATCH_BUFFER_OVERFLOW_FACTOR invalid — using 2.0")
     BUFFER_OVERFLOW_FACTOR = 2.0
 
+
 # ── Protocol for dependency injection ─────────────────────────
 @runtime_checkable
 class DBFactoryProtocol(Protocol):
     """Protocol for async session factory — enables mocking in tests."""
+
     def __call__(self): ...
+
 
 # ── Pydantic models for structured validation ─────────────────
 class WriterConfig(BaseModel):
     """Validated configuration for batch writer."""
+
     batch_interval_s: float = Field(default=BATCH_INTERVAL_S, ge=1, le=300)
     batch_max_size: int = Field(default=BATCH_MAX_SIZE, ge=100, le=5000)
     buffer_overflow_factor: float = Field(default=BUFFER_OVERFLOW_FACTOR, ge=1.5, le=5.0)
-    
+
     @property
     def max_buffer_size(self) -> int:
         return int(self.batch_max_size * self.buffer_overflow_factor)
 
+
 @dataclass
 class ViolationRecord:
     """One violation event ready for DB insertion."""
+
     track_id: int
     class_name: str
     confidence: float
-    zone_id: Optional[str]
+    zone_id: str | None
     bbox_x1: float
     bbox_y1: float
     bbox_x2: float
@@ -95,7 +108,7 @@ class ViolationRecord:
     frame_idx: int
     camera_id: str
     timestamp: float = field(default_factory=lambda: time.time())
-    
+
     def __post_init__(self):
         # Validate fields
         if self.track_id < 0:
@@ -108,9 +121,11 @@ class ViolationRecord:
             raise ValueError(f"Invalid camera_id: {self.camera_id}")
         # Validate bbox coordinates
         if self.bbox_x1 >= self.bbox_x2 or self.bbox_y1 >= self.bbox_y2:
-            raise ValueError(f"Invalid bbox: x1={self.bbox_x1}, y1={self.bbox_y1}, x2={self.bbox_x2}, y2={self.bbox_y2}")
-    
-    def to_dict(self) -> Dict[str, Any]:
+            raise ValueError(
+                f"Invalid bbox: x1={self.bbox_x1}, y1={self.bbox_y1}, x2={self.bbox_x2}, y2={self.bbox_y2}"
+            )
+
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dict for JSON serialization."""
         return {
             "track_id": self.track_id,
@@ -126,24 +141,29 @@ class ViolationRecord:
             "timestamp": self.timestamp,
         }
 
+
 # ── Custom exceptions ────────────────────────────────────────
 class PerformanceError(Exception):
     """Base exception for performance operations."""
+
     pass
+
 
 class BatchWriteError(PerformanceError):
     """Raised when batch write to DB fails."""
+
     pass
+
 
 class BatchWriter:
     """
     Buffers violation events and writes in batches.
-    
+
     # FIXED: Parameterized queries with proper batching (no string interpolation)
     # IMPROVED: Memory-efficient deque with bounded size
     # IMPROVED: Dependency injection for testability
     # FIXED: No PII leakage in logs
-    
+
     Usage:
         writer = BatchWriter()
         await writer.start(db_factory)
@@ -155,12 +175,12 @@ class BatchWriter:
         await writer.stop()
     """
 
-    def __init__(self, config: Optional[WriterConfig] = None) -> None:
+    def __init__(self, config: WriterConfig | None = None) -> None:
         self._config = config or WriterConfig()
         self._buffer: deque[ViolationRecord] = deque(maxlen=self._config.max_buffer_size)
         self._lock = asyncio.Lock()
-        self._task: Optional[asyncio.Task] = None
-        self._db_factory: Optional[DBFactoryProtocol] = None
+        self._task: asyncio.Task | None = None
+        self._db_factory: DBFactoryProtocol | None = None
 
         # Stats
         self._total_written = 0
@@ -171,7 +191,9 @@ class BatchWriter:
 
         logger.info(
             "BatchWriter initialized | interval={}s | max_size={} | buffer_max={}",
-            self._config.batch_interval_s, self._config.batch_max_size, self._config.max_buffer_size,
+            self._config.batch_interval_s,
+            self._config.batch_max_size,
+            self._config.max_buffer_size,
         )
 
     async def start(self, db_factory: DBFactoryProtocol) -> None:
@@ -196,7 +218,10 @@ class BatchWriter:
         await self._flush()
         logger.info(
             "BatchWriter stopped | written={} | batches={} | dropped={} | errors={}",
-            self._total_written, self._total_batches, self._total_dropped, self._errors,
+            self._total_written,
+            self._total_batches,
+            self._total_dropped,
+            self._errors,
         )
 
     def enqueue(self, record: ViolationRecord) -> bool:
@@ -214,13 +239,13 @@ class BatchWriter:
         except Exception:
             self._total_dropped += 1
             return False
-        
+
         # Try to append; if buffer is full, drop oldest
         if len(self._buffer) >= self._config.max_buffer_size:
             self._buffer.popleft()
             self._total_dropped += 1
             logger.debug("BatchWriter buffer full — oldest violation dropped")
-        
+
         self._buffer.append(record)
         return True
 
@@ -229,14 +254,16 @@ class BatchWriter:
         while True:
             try:
                 await asyncio.sleep(min(self._config.batch_interval_s, 5.0))
-                
+
                 # Flush if buffer has data OR if it's full
                 async with self._lock:
-                    should_flush = bool(self._buffer) or len(self._buffer) >= self._config.batch_max_size
-                
+                    should_flush = (
+                        bool(self._buffer) or len(self._buffer) >= self._config.batch_max_size
+                    )
+
                 if should_flush and self._db_factory:
                     await self._flush()
-                    
+
             except asyncio.CancelledError:
                 break
             except Exception as exc:
@@ -248,26 +275,26 @@ class BatchWriter:
         """Write all buffered violations in one multi-row INSERT."""
         if not self._db_factory:
             return
-        
+
         # Get records to flush under lock
         async with self._lock:
             if not self._buffer:
                 return
             records = list(self._buffer)
             self._buffer.clear()
-        
+
         if not records:
             return
-        
+
         from sqlalchemy import text
-        
+
         try:
             async with self._db_factory() as session:
                 # Build parameterized query with proper batching
                 # Use executemany-style approach for better performance
                 values = []
                 params_list = []
-                
+
                 for i, r in enumerate(records):
                     values.append(f"""
                         (
@@ -276,24 +303,26 @@ class BatchWriter:
                             :fidx{i}, :cam{i}, NOW()
                         )
                     """)
-                    params_list.append({
-                        f"tid{i}": r.track_id,
-                        f"cls{i}": r.class_name,
-                        f"conf{i}": r.confidence,
-                        f"zone{i}": r.zone_id,
-                        f"bx1{i}": round(r.bbox_x1, 1),
-                        f"by1{i}": round(r.bbox_y1, 1),
-                        f"bx2{i}": round(r.bbox_x2, 1),
-                        f"by2{i}": round(r.bbox_y2, 1),
-                        f"fidx{i}": r.frame_idx,
-                        f"cam{i}": r.camera_id,
-                    })
-                
+                    params_list.append(
+                        {
+                            f"tid{i}": r.track_id,
+                            f"cls{i}": r.class_name,
+                            f"conf{i}": r.confidence,
+                            f"zone{i}": r.zone_id,
+                            f"bx1{i}": round(r.bbox_x1, 1),
+                            f"by1{i}": round(r.bbox_y1, 1),
+                            f"bx2{i}": round(r.bbox_x2, 1),
+                            f"by2{i}": round(r.bbox_y2, 1),
+                            f"fidx{i}": r.frame_idx,
+                            f"cam{i}": r.camera_id,
+                        }
+                    )
+
                 # Combine all params into single dict
                 all_params = {}
                 for p in params_list:
                     all_params.update(p)
-                
+
                 query = text(f"""
                     INSERT INTO violation_events
                     (track_id, class_name, confidence, zone_id,
@@ -301,7 +330,7 @@ class BatchWriter:
                      frame_idx, camera_id, recorded_at)
                     VALUES {','.join(values)}
                 """)
-                
+
                 await session.execute(query, all_params)
                 await session.commit()
 
@@ -311,7 +340,9 @@ class BatchWriter:
 
             logger.debug(
                 "BatchWriter flushed | rows={} | total={} | batches={}",
-                len(records), self._total_written, self._total_batches,
+                len(records),
+                self._total_written,
+                self._total_batches,
             )
 
         except Exception as exc:
@@ -320,7 +351,7 @@ class BatchWriter:
             # Re-queue failed records at front of buffer (with limit)
             async with self._lock:
                 # Only re-queue up to batch_max_size to prevent infinite growth
-                for r in reversed(records[:self._config.batch_max_size]):
+                for r in reversed(records[: self._config.batch_max_size]):
                     self._buffer.appendleft(r)
                 self._total_dropped += max(0, len(records) - self._config.batch_max_size)
 
@@ -349,7 +380,7 @@ class BatchWriter:
 
 
 # ── Singleton with lazy initialization ───────────────────────
-_batch_writer_instance: Optional[BatchWriter] = None
+_batch_writer_instance: BatchWriter | None = None
 
 
 def get_batch_writer(**kwargs) -> BatchWriter:

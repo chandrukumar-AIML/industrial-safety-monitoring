@@ -32,9 +32,7 @@ Usage:
 from __future__ import annotations
 
 import os
-import re
 from pathlib import Path
-from typing import List, Optional, Tuple, Dict, Any
 
 import cv2
 import numpy as np
@@ -57,10 +55,13 @@ CLEAR_CACHE_AFTER_EXPLAIN = os.getenv("EXPLAINER_CLEAR_CACHE", "true").lower() =
 # ── Custom exceptions ────────────────────────────────────────
 class ExplainerError(Exception):
     """Base exception for explainer operations."""
+
     pass
+
 
 class ExplainerRuntimeError(ExplainerError):
     """Raised when explanation generation fails."""
+
     pass
 
 
@@ -71,7 +72,7 @@ class SHAPExplainer:
     # FIXED: Proper hook cleanup to prevent memory leaks
     # FIXED: Input validation + sanitization
     # IMPROVED: Config validation at module load
-    
+
     Named SHAPExplainer for API compatibility with backend/main.py and
     backend/routes/shap_route.py — the implementation uses GradCAM
     which is faster and more stable on YOLOv8's multi-scale architecture.
@@ -95,10 +96,9 @@ class SHAPExplainer:
         model_path_obj = Path(model_path)
         if not model_path_obj.exists():
             raise FileNotFoundError(
-                f"Model weights not found: {model_path}\n"
-                "Run Phase 7 training first."
+                f"Model weights not found: {model_path}\n" "Run Phase 7 training first."
             )
-        
+
         # Validate device
         if device not in ("cpu", "cuda", "mps", "cuda:0", "cuda:1"):
             logger.warning("Unknown device: {} — using 'cpu'", device)
@@ -117,8 +117,8 @@ class SHAPExplainer:
 
         # Find best hook layer (C2f in neck, after layer 10)
         self._layer_idx = self._find_target_layer()
-        self._activations: Optional[torch.Tensor] = None
-        self._gradients: Optional[torch.Tensor] = None
+        self._activations: torch.Tensor | None = None
+        self._gradients: torch.Tensor | None = None
         self._handles: list = []
 
         self._register_hooks()
@@ -149,16 +149,16 @@ class SHAPExplainer:
         """Register forward + backward hooks on the target layer."""
         # Clean up any existing hooks first
         self.remove_hooks()
-        
+
         target = self._model.model[self._layer_idx]
 
         def _fwd(m, inp, out):
             # Store activation (handle list/tuple outputs)
-            self._activations = out[0] if isinstance(out, (list, tuple)) else out
+            self._activations = out[0] if isinstance(out, list | tuple) else out
 
         def _bwd(m, gin, gout):
             # Store gradient (handle list/tuple outputs)
-            g = gout[0] if isinstance(gout, (list, tuple)) else gout
+            g = gout[0] if isinstance(gout, list | tuple) else gout
             if g is not None:
                 self._gradients = g
 
@@ -185,22 +185,17 @@ class SHAPExplainer:
     def _preprocess(self, img_bgr: np.ndarray, size: int = None) -> torch.Tensor:
         """BGR ndarray → normalised BCHW float32 tensor on self.device."""
         size = size or self._input_size
-        
+
         # Validate input
         if img_bgr is None or img_bgr.size == 0:
             raise ValueError("Input image is empty")
         if img_bgr.ndim != 3 or img_bgr.shape[2] != 3:
             raise ValueError(f"Expected 3-channel BGR image, got shape {img_bgr.shape}")
-        
+
         img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
         img_r = cv2.resize(img_rgb, (size, size))
         arr = img_r.astype(np.float32) / 255.0
-        t = (
-            torch.from_numpy(arr)
-                 .permute(2, 0, 1)
-                 .unsqueeze(0)
-                 .to(self.device)
-        )
+        t = torch.from_numpy(arr).permute(2, 0, 1).unsqueeze(0).to(self.device)
         return t
 
     # ── Core GradCAM ──────────────────────────────────────────
@@ -268,15 +263,15 @@ class SHAPExplainer:
             return np.zeros((oh, ow), dtype=np.float32)
 
         result = ((cam_resized - c_min) / (c_max - c_min)).astype(np.float32)
-        
+
         # Optional: Clear cache to free memory
         if CLEAR_CACHE_AFTER_EXPLAIN:
             if torch.cuda.is_available() and self.device.startswith("cuda"):
                 torch.cuda.empty_cache()
-        
+
         return result
 
-    def _extract_score(self, preds) -> Optional[torch.Tensor]:
+    def _extract_score(self, preds) -> torch.Tensor | None:
         """
         Extract a scalar score from YOLOv8 raw output.
         Handles both training-mode (tuple) and eval-mode (tensor) outputs.
@@ -286,11 +281,11 @@ class SHAPExplainer:
         if isinstance(out, dict):
             out = out.get("one2many", list(out.values())[0])
 
-        if isinstance(out, (list, tuple)):
+        if isinstance(out, list | tuple):
             # YOLOv8: index 1 is raw predictions (before post-processing)
             out = out[1] if len(out) > 1 else out[0]
 
-        if isinstance(out, (list, tuple)):
+        if isinstance(out, list | tuple):
             out = out[0]
 
         if not isinstance(out, torch.Tensor):
@@ -304,7 +299,7 @@ class SHAPExplainer:
 
         return out.abs().mean()
 
-    def _build_cam(self) -> Optional[np.ndarray]:
+    def _build_cam(self) -> np.ndarray | None:
         """
         Build GradCAM from stored activations and gradients.
         Falls back to activation-only map if gradients are unavailable.
@@ -365,7 +360,7 @@ class SHAPExplainer:
         saliency: np.ndarray,
         n_regions: int = 3,
         threshold: float = 0.5,
-    ) -> List[dict]:
+    ) -> list[dict]:
         """
         Find the top-N spatial regions with highest saliency.
 
@@ -406,10 +401,12 @@ class SHAPExplainer:
                 mean_val = float(cell.mean()) if cell.size > 0 else 0.0
 
                 if mean_val >= threshold:
-                    regions.append({
-                        "zone": grid_labels[r][c],
-                        "shap_value": round(mean_val, 4),
-                    })
+                    regions.append(
+                        {
+                            "zone": grid_labels[r][c],
+                            "shap_value": round(mean_val, 4),
+                        }
+                    )
 
         # Sort descending by shap_value, cap at n_regions
         regions.sort(key=lambda x: x["shap_value"], reverse=True)
@@ -434,6 +431,7 @@ class SHAPExplainer:
         Run: python -c "from inference.explainer import SHAPExplainer; SHAPExplainer.smoke_test()"
         """
         import os
+
         if not os.path.exists(model_path):
             logger.warning("smoke_test: {} not found — skipping", Path(model_path).name)
             return

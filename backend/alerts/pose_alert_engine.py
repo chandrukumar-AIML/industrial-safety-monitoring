@@ -16,14 +16,13 @@ import math
 import os
 import time
 from collections import defaultdict, deque
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
+from dataclasses import dataclass
+from enum import Enum
+from typing import TYPE_CHECKING
 
 import cv2
 import numpy as np
 from loguru import logger
-from enum import Enum
-from pydantic import BaseModel, Field  # FIXED: removed stale v1 validator import
 
 # ── Type hint only import (no runtime cost) ───────────────────
 if TYPE_CHECKING:
@@ -42,17 +41,34 @@ def _cfg(name: str, raw: str, default: float, lo: float, hi: float) -> float:
         return default
     return val
 
-_BENDING_ANGLE_THRESHOLD = _cfg("POSE_BENDING_ANGLE_THRESHOLD",
-    os.getenv("POSE_BENDING_ANGLE_THRESHOLD", "50.0"), 50.0, 0.0, 90.0)
 
-_HEAD_DROP_THRESHOLD = _cfg("POSE_HEAD_DROP_THRESHOLD",
-    os.getenv("POSE_HEAD_DROP_THRESHOLD", "40.0"), 40.0, 0.0, 90.0)
+_BENDING_ANGLE_THRESHOLD = _cfg(
+    "POSE_BENDING_ANGLE_THRESHOLD",
+    os.getenv("POSE_BENDING_ANGLE_THRESHOLD", "50.0"),
+    50.0,
+    0.0,
+    90.0,
+)
 
-_FATIGUE_PERSISTENCE_S = _cfg("POSE_FATIGUE_PERSISTENCE_SECONDS",
-    os.getenv("POSE_FATIGUE_PERSISTENCE_SECONDS", "3.0"), 3.0, 0.5, 10.0)
+_HEAD_DROP_THRESHOLD = _cfg(
+    "POSE_HEAD_DROP_THRESHOLD", os.getenv("POSE_HEAD_DROP_THRESHOLD", "40.0"), 40.0, 0.0, 90.0
+)
 
-_FALL_VELOCITY_THRESHOLD = _cfg("POSE_FALL_VELOCITY_THRESHOLD",
-    os.getenv("POSE_FALL_VELOCITY_THRESHOLD", "0.15"), 0.15, 0.05, 0.5)
+_FATIGUE_PERSISTENCE_S = _cfg(
+    "POSE_FATIGUE_PERSISTENCE_SECONDS",
+    os.getenv("POSE_FATIGUE_PERSISTENCE_SECONDS", "3.0"),
+    3.0,
+    0.5,
+    10.0,
+)
+
+_FALL_VELOCITY_THRESHOLD = _cfg(
+    "POSE_FALL_VELOCITY_THRESHOLD",
+    os.getenv("POSE_FALL_VELOCITY_THRESHOLD", "0.15"),
+    0.15,
+    0.05,
+    0.5,
+)
 
 _FALL_HISTORY_S = float(os.getenv("POSE_FALL_HISTORY_SECONDS", "0.5"))
 _FALL_COOLDOWN_S = float(os.getenv("POSE_FALL_COOLDOWN_SECONDS", "10.0"))
@@ -70,16 +86,17 @@ class HazardType(str, Enum):
 @dataclass
 class PoseHazard:
     """One detected pose hazard event."""
+
     hazard_type: str
     severity: str  # CRITICAL | HIGH | MEDIUM | LOW
     confidence: float  # [0, 1]
     track_id: int
-    zone_id: Optional[str]
+    zone_id: str | None
     frame_idx: int
     landmark_data: dict  # relevant landmarks for audit
     description: str  # human-readable explanation
     combined_alert: bool = False  # True if also has PPE violation
-    
+
     def to_dict(self) -> dict:
         """Convert to dict for JSON serialization."""
         return {
@@ -99,7 +116,7 @@ class PoseHazard:
 class DangerousBendingDetector:
     """
     Detects dangerous forward bending near machinery.
-    
+
     Method: compute angle at hip between shoulder and knee.
     Normal standing: ~160-170°
     Dangerous bending: < threshold
@@ -107,10 +124,10 @@ class DangerousBendingDetector:
 
     def detect(
         self,
-        pose: "PoseLandmarks",
+        pose: PoseLandmarks,
         track_id: int,
         frame_idx: int,
-    ) -> Optional[PoseHazard]:
+    ) -> PoseHazard | None:
         # Use left side — fall back to right if left not visible
         angle = pose.angle_between("left_shoulder", "left_hip", "left_knee")
         side = "left"
@@ -123,13 +140,13 @@ class DangerousBendingDetector:
         if angle > _BENDING_ANGLE_THRESHOLD:
             return None
 
-        confidence = max(0.0, min(1.0,
-            (_BENDING_ANGLE_THRESHOLD - angle) / _BENDING_ANGLE_THRESHOLD
-        ))
+        confidence = max(
+            0.0, min(1.0, (_BENDING_ANGLE_THRESHOLD - angle) / _BENDING_ANGLE_THRESHOLD)
+        )
 
         hip = pose.get(f"{side}_hip")
-        knee = pose.get(f"{side}_knee")
-        shoul = pose.get(f"{side}_shoulder")
+        pose.get(f"{side}_knee")
+        pose.get(f"{side}_shoulder")
 
         return PoseHazard(
             hazard_type=HazardType.DANGEROUS_BENDING.value,
@@ -156,14 +173,14 @@ class DangerousBendingDetector:
 class ReachingDetector:
     """
     Detects wrist reaching into registered danger/restricted zones.
-    
+
     # IMPROVED: Spatial indexing hint for large zone lists
     """
 
-    def __init__(self, zone_polygons: Dict[str, list] = None) -> None:
+    def __init__(self, zone_polygons: dict[str, list] = None) -> None:
         self._zone_polygons = zone_polygons or {}
         # Optional: build spatial index for large zone lists
-        self._spatial_index: Optional[Dict] = None
+        self._spatial_index: dict | None = None
         if len(self._zone_polygons) > 10:
             self._build_spatial_index()
 
@@ -178,13 +195,13 @@ class ReachingDetector:
             for zone_id, polygon in self._zone_polygons.items()
         }
 
-    def _compute_bbox(self, polygon_norm: List[List[float]]) -> Tuple[float, float, float, float]:
+    def _compute_bbox(self, polygon_norm: list[list[float]]) -> tuple[float, float, float, float]:
         """Compute bounding box for normalized polygon."""
         xs = [p[0] for p in polygon_norm]
         ys = [p[1] for p in polygon_norm]
         return min(xs), min(ys), max(xs), max(ys)
 
-    def update_zones(self, zone_polygons: Dict[str, list]) -> None:
+    def update_zones(self, zone_polygons: dict[str, list]) -> None:
         """Update registered zones. Called when zones change."""
         self._zone_polygons = zone_polygons
         if len(zone_polygons) > 10:
@@ -194,11 +211,11 @@ class ReachingDetector:
 
     def detect(
         self,
-        pose: "PoseLandmarks",
+        pose: PoseLandmarks,
         track_id: int,
         frame_idx: int,
-        frame_wh: Tuple[int, int] = (640, 640),
-    ) -> Optional[PoseHazard]:
+        frame_wh: tuple[int, int] = (640, 640),
+    ) -> PoseHazard | None:
         if not self._zone_polygons:
             return None
 
@@ -219,7 +236,7 @@ class ReachingDetector:
                     bbox = self._spatial_index[zone_id]["bbox"]
                     if not (bbox[0] <= wrist[0] <= bbox[2] and bbox[1] <= wrist[1] <= bbox[3]):
                         continue
-                
+
                 poly_px = np.array(
                     [[int(p[0] * fw), int(p[1] * fh)] for p in polygon_norm],
                     dtype=np.float32,
@@ -251,13 +268,13 @@ class ReachingDetector:
 class FatigueDetector:
     """
     Detects fatigue posture — sustained head drooping.
-    
+
     # FIXED: Temporal history cleanup to prevent memory leaks
     """
 
     def __init__(self, max_history_s: float = 10.0) -> None:
         # track_id → deque of (timestamp, head_angle)
-        self._history: Dict[int, deque] = defaultdict(
+        self._history: dict[int, deque] = defaultdict(
             lambda: deque(maxlen=int(max_history_s * 30))  # 30fps assumption
         )
         self._max_history_s = max_history_s
@@ -270,10 +287,10 @@ class FatigueDetector:
 
     def detect(
         self,
-        pose: "PoseLandmarks",
+        pose: PoseLandmarks,
         track_id: int,
         frame_idx: int,
-    ) -> Optional[PoseHazard]:
+    ) -> PoseHazard | None:
         nose = pose.get("nose")
         shoulder_mid = pose.midpoint("left_shoulder", "right_shoulder")
         hip_mid = pose.midpoint("left_hip", "right_hip")
@@ -285,11 +302,8 @@ class FatigueDetector:
         v_head = (nose[0] - shoulder_mid[0], nose[1] - shoulder_mid[1])
         v_body = (hip_mid[0] - shoulder_mid[0], hip_mid[1] - shoulder_mid[1])
 
-        dot = v_head[0]*v_body[0] + v_head[1]*v_body[1]
-        mag = (
-            (v_head[0]**2 + v_head[1]**2)**0.5 *
-            (v_body[0]**2 + v_body[1]**2)**0.5
-        )
+        dot = v_head[0] * v_body[0] + v_head[1] * v_body[1]
+        mag = (v_head[0] ** 2 + v_head[1] ** 2) ** 0.5 * (v_body[0] ** 2 + v_body[1] ** 2) ** 0.5
         if mag < 1e-6:
             return None
 
@@ -347,17 +361,17 @@ class FatigueDetector:
 class FallDetector:
     """
     Detects worker falls via rapid downward hip displacement.
-    
+
     # FIXED: Cooldown management + memory cleanup
     """
 
     def __init__(self) -> None:
         # track_id → deque of (timestamp, hip_y_normalised)
-        self._hip_history: Dict[int, deque] = defaultdict(
+        self._hip_history: dict[int, deque] = defaultdict(
             lambda: deque(maxlen=int(_FALL_HISTORY_S * 30 + 10))
         )
         # Suppress duplicate fall alerts
-        self._fall_reported: Dict[int, float] = {}
+        self._fall_reported: dict[int, float] = {}
         self._fall_cooldown_s = _FALL_COOLDOWN_S
 
     def _cleanup_old_entries(self, track_id: int, now: float) -> None:
@@ -365,19 +379,20 @@ class FallDetector:
         history = self._hip_history[track_id]
         while history and now - history[0][0] > _FALL_HISTORY_S:
             history.popleft()
-        
+
         # Cleanup old fall reports
         self._fall_reported = {
-            tid: ts for tid, ts in self._fall_reported.items()
+            tid: ts
+            for tid, ts in self._fall_reported.items()
             if now - ts < self._fall_cooldown_s * 2
         }
 
     def detect(
         self,
-        pose: "PoseLandmarks",
+        pose: PoseLandmarks,
         track_id: int,
         frame_idx: int,
-    ) -> Optional[PoseHazard]:
+    ) -> PoseHazard | None:
         # Fall suppression cooldown
         now = time.monotonic()
         last_fall = self._fall_reported.get(track_id, 0)
@@ -445,17 +460,17 @@ class FallDetector:
 class PoseAlertEngine:
     """
     Orchestrates all four pose hazard detectors.
-    
+
     # IMPROVED: Dependency injection for testability
     # IMPROVED: Combined alert logic with PPE violation correlation
     """
 
     def __init__(
         self,
-        bending_detector: Optional[DangerousBendingDetector] = None,
-        reaching_detector: Optional[ReachingDetector] = None,
-        fatigue_detector: Optional[FatigueDetector] = None,
-        fall_detector: Optional[FallDetector] = None,
+        bending_detector: DangerousBendingDetector | None = None,
+        reaching_detector: ReachingDetector | None = None,
+        fatigue_detector: FatigueDetector | None = None,
+        fall_detector: FallDetector | None = None,
     ) -> None:
         self._bending = bending_detector or DangerousBendingDetector()
         self._reaching = reaching_detector or ReachingDetector()
@@ -464,7 +479,7 @@ class PoseAlertEngine:
 
         logger.info("PoseAlertEngine initialised")
 
-    def update_zones(self, zone_polygons: Dict[str, list]) -> None:
+    def update_zones(self, zone_polygons: dict[str, list]) -> None:
         """Pass current zone definitions to the reaching detector."""
         self._reaching.update_zones(zone_polygons)
 
@@ -474,7 +489,7 @@ class PoseAlertEngine:
         ppe_violations: list,  # List[TrackedDetection] with is_violation=True
         frame_wh: tuple,
         frame_idx: int = 0,
-    ) -> List[PoseHazard]:
+    ) -> list[PoseHazard]:
         """
         Run all hazard detectors on detected poses.
         Marks hazards as combined_alert if the same track also has a PPE violation.
@@ -485,7 +500,7 @@ class PoseAlertEngine:
         # Track IDs with active PPE violations for combined alert logic
         violating_tracks = {v.track_id for v in ppe_violations}
 
-        all_hazards: List[PoseHazard] = []
+        all_hazards: list[PoseHazard] = []
 
         for i, pose in enumerate(poses):
             track_id = i  # simplified mapping — replace with proper track association in Phase J
@@ -512,13 +527,15 @@ class PoseAlertEngine:
                 all_hazards.append(hazard)
                 logger.warning(
                     "POSE HAZARD | type={} | severity={} | track={} | combined={}",
-                    hazard.hazard_type, hazard.severity,
-                    track_id, hazard.combined_alert,
+                    hazard.hazard_type,
+                    hazard.severity,
+                    track_id,
+                    hazard.combined_alert,
                 )
 
         return all_hazards
 
-    def get_hazard_summary(self, hazards: List[PoseHazard]) -> dict:
+    def get_hazard_summary(self, hazards: list[PoseHazard]) -> dict:
         """Summary dict for WebSocket broadcast."""
         return {
             "total": len(hazards),
@@ -529,7 +546,7 @@ class PoseAlertEngine:
 
 
 # ── Singleton with lazy initialization ───────────────────────
-_pose_alert_engine_instance: Optional[PoseAlertEngine] = None
+_pose_alert_engine_instance: PoseAlertEngine | None = None
 
 
 def get_pose_alert_engine(**kwargs) -> PoseAlertEngine:

@@ -1,16 +1,14 @@
 from __future__ import annotations
 
 import json
-from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status, Response, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from loguru import logger
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import text
 from sqlmodel.ext.asyncio.session import AsyncSession
-from loguru import logger
 
-from ..database import get_session, AsyncSessionLocal
-from ..state import app_state
+from ..database import AsyncSessionLocal, get_session
 
 router = APIRouter(prefix="/zones", tags=["zones"])
 
@@ -20,6 +18,7 @@ _MAX_POLY_VERTICES = 20
 
 
 # ───────────────── MODELS ─────────────────
+
 
 class PolygonPoint(BaseModel):
     x: float = Field(ge=0.0, le=1.0)
@@ -31,8 +30,8 @@ class ZoneCreate(BaseModel):
     zone_name: str = Field(min_length=1, max_length=128)
     zone_type: str
     camera_id: str = "default"
-    polygon_norm: List[PolygonPoint]
-    required_ppe: List[str] = []
+    polygon_norm: list[PolygonPoint]
+    required_ppe: list[str] = []
     alert_enabled: bool = True
     dwell_threshold_s: float = Field(default=2.0, ge=0.5, le=60.0)
     color_hex: str = "#ef4444"
@@ -60,8 +59,8 @@ class ZoneOut(BaseModel):
     zone_name: str
     zone_type: str
     camera_id: str
-    polygon_norm: List[List[float]]
-    required_ppe: List[str]
+    polygon_norm: list[list[float]]
+    required_ppe: list[str]
     alert_enabled: bool
     dwell_threshold_s: float
     color_hex: str
@@ -73,17 +72,18 @@ class ZoneOut(BaseModel):
 class ZoneAlertOut(BaseModel):
     id: int
     zone_id: str
-    zone_name: Optional[str]
-    alert_type: Optional[str]
-    message: Optional[str]
+    zone_name: str | None
+    alert_type: str | None
+    message: str | None
     severity: str
     acknowledged: bool
-    acknowledged_by: Optional[str]
-    acknowledged_at: Optional[str]
+    acknowledged_by: str | None
+    acknowledged_at: str | None
     created_at: str
 
 
 # ───────────────── HELPERS ─────────────────
+
 
 async def _reload_engine_zones() -> None:
     from ..alerts.zone_alert_engine import zone_alert_engine
@@ -97,9 +97,10 @@ async def _reload_engine_zones() -> None:
 
 # ───────────────── ROUTES ─────────────────
 
-@router.get("", response_model=List[ZoneOut])
+
+@router.get("", response_model=list[ZoneOut])
 async def list_zones(
-    camera_id: Optional[str] = Query(None, max_length=100),
+    camera_id: str | None = Query(None, max_length=100),
     # FIXED: Added pagination to prevent unbounded SELECT *
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
@@ -131,7 +132,11 @@ async def list_zones(
             "polygon_norm": (
                 json.loads(row["polygon_norm"])
                 if isinstance(row["polygon_norm"], str) and row["polygon_norm"]
-                else ([[0,0],[1,0],[1,1],[0,1]] if not row["polygon_norm"] else row["polygon_norm"])
+                else (
+                    [[0, 0], [1, 0], [1, 1], [0, 1]]
+                    if not row["polygon_norm"]
+                    else row["polygon_norm"]
+                )
             ),
             "required_ppe": (
                 json.loads(row["required_ppe"])
@@ -148,6 +153,7 @@ async def list_zones(
 async def create_zone(body: ZoneCreate, session: AsyncSession = Depends(get_session)):
     # FIXED: Complete parameterized INSERT (was broken stub)
     import json as _json
+
     polygon_json = _json.dumps([[p.x, p.y] for p in body.polygon_norm])
     ppe_json = _json.dumps(body.required_ppe)
 
@@ -201,11 +207,9 @@ async def delete_zone(
     zone_id: str,
     session: AsyncSession = Depends(get_session),
 ) -> Response:
-
     # FIXED: Wrong table name "zones" → "camera_zones"
     result = await session.execute(
-        text("UPDATE camera_zones SET active=0 WHERE zone_id=:id RETURNING id"),
-        {"id": zone_id}
+        text("UPDATE camera_zones SET active=0 WHERE zone_id=:id RETURNING id"), {"id": zone_id}
     )
 
     if not result.first():
@@ -217,15 +221,14 @@ async def delete_zone(
 
 
 # ✅ FINAL CLEAN ALERTS ROUTE
-@router.get("/alerts", response_model=List[ZoneAlertOut])
+@router.get("/alerts", response_model=list[ZoneAlertOut])
 async def list_zone_alerts(
-    zone_id: Optional[str] = Query(None),
-    severity: Optional[str] = Query(None),
-    acknowledged: Optional[bool] = Query(None),
+    zone_id: str | None = Query(None),
+    severity: str | None = Query(None),
+    acknowledged: bool | None = Query(None),
     limit: int = Query(50, ge=1, le=500),
     session: AsyncSession = Depends(get_session),
 ):
-
     where = []
     params = {"limit": limit}
 
@@ -272,8 +275,7 @@ async def acknowledge_alert(
     session: AsyncSession = Depends(get_session),
 ):
     result = await session.execute(
-        text("UPDATE zone_alerts SET acknowledged=1 WHERE id=:id RETURNING id"),
-        {"id": alert_id}
+        text("UPDATE zone_alerts SET acknowledged=1 WHERE id=:id RETURNING id"), {"id": alert_id}
     )
 
     if not result.first():

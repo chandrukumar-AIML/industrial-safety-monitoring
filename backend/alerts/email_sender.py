@@ -13,15 +13,13 @@ Sends HTML email with inline violation frame attachment.
 
 from __future__ import annotations
 
-import base64
 import html
 import os
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from email.mime.image import MIMEImage
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from typing import Optional
 
 import aiosmtplib
 from loguru import logger
@@ -39,16 +37,23 @@ SMTP_TIMEOUT_S = float(os.getenv("SMTP_TIMEOUT_SECONDS", "30.0"))
 
 # Severity styling
 _SEVERITY_BG = {
-    "CRITICAL": "#7f1d1d", "HIGH": "#7c2d12", "MEDIUM": "#713f12", "LOW": "#14532d",
+    "CRITICAL": "#7f1d1d",
+    "HIGH": "#7c2d12",
+    "MEDIUM": "#713f12",
+    "LOW": "#14532d",
 }
 _SEVERITY_BORDER = {
-    "CRITICAL": "#dc2626", "HIGH": "#ea580c", "MEDIUM": "#ca8a04", "LOW": "#16a34a",
+    "CRITICAL": "#dc2626",
+    "HIGH": "#ea580c",
+    "MEDIUM": "#ca8a04",
+    "LOW": "#16a34a",
 }
 
 
 # ── Pydantic model for email input validation ─────────────────
 class EmailAlertInput(BaseModel):
     """Validated input for email alert."""
+
     to_email: EmailStr
     to_name: str = Field(..., min_length=1, max_length=100)
     zone_name: str = Field(..., min_length=1, max_length=200)
@@ -57,7 +62,7 @@ class EmailAlertInput(BaseModel):
     missing_ppe: list[str] = Field(default_factory=list)
     severity: str = Field(..., pattern="^(CRITICAL|HIGH|MEDIUM|LOW)$")
     timestamp: str = Field(..., min_length=1)  # ISO format expected
-    image_bytes: Optional[bytes] = Field(default=None, exclude=True)
+    image_bytes: bytes | None = Field(default=None, exclude=True)
     camera_id: str = Field(default="CAM-01", min_length=1, max_length=50)
 
     @field_validator("missing_ppe", mode="before")
@@ -74,18 +79,18 @@ class EmailAlertInput(BaseModel):
         try:
             dt = datetime.fromisoformat(v.replace("Z", "+00:00"))
             if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-            return dt.astimezone(timezone.utc).isoformat()
+                dt = dt.replace(tzinfo=UTC)
+            return dt.astimezone(UTC).isoformat()
         except ValueError:
             logger.warning("Invalid timestamp format: {} — using current UTC", v)
-            return datetime.now(timezone.utc).isoformat()
+            return datetime.now(UTC).isoformat()
 
 
 # ── Helper: Sanitize user input for HTML ─────────────────────
 def _sanitize_html(text: str) -> str:
     """
     Sanitize text for safe inclusion in HTML email.
-    
+
     # FIXED: Prevent XSS via script injection or HTML entity abuse
     """
     if not text:
@@ -93,7 +98,7 @@ def _sanitize_html(text: str) -> str:
     # Escape HTML special characters
     text = html.escape(str(text))
     # Remove any remaining script/style tags (defense in depth)
-    text = re.sub(r'<(script|style)[^>]*>.*?</\1>', '', text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r"<(script|style)[^>]*>.*?</\1>", "", text, flags=re.DOTALL | re.IGNORECASE)
     # Limit length to prevent email bloat
     return text[:500]
 
@@ -103,7 +108,7 @@ def _format_timestamp_utc(iso_str: str) -> str:
     try:
         dt = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
+            dt = dt.replace(tzinfo=UTC)
         return dt.strftime("%d-%b-%Y %H:%M:%S UTC")
     except Exception:
         return iso_str[:19].replace("T", " ") + " UTC"
@@ -122,7 +127,7 @@ def _build_html_email(
     """Build a rich, sanitized HTML email body."""
     bg = _SEVERITY_BG.get(severity, "#1e293b")
     border = _SEVERITY_BORDER.get(severity, "#334155")
-    
+
     # Sanitize ALL user-provided fields
     zone_name_safe = _sanitize_html(zone_name)
     zone_type_safe = _sanitize_html(zone_type)
@@ -220,19 +225,19 @@ def _validate_smtp_config() -> bool:
     if not os.getenv("ENABLE_EMAIL_ALERTS", "true").lower() == "true":
         logger.info("Email alerts disabled via config")
         return False
-    
+
     required = ["SMTP_USERNAME", "SMTP_PASSWORD", "SMTP_FROM_EMAIL"]
     missing = [k for k in required if not os.getenv(k)]
     if missing:
         logger.warning("SMTP config incomplete — email alerts disabled: {}", missing)
         return False
-    
+
     # Validate email format
     from_email = os.getenv("SMTP_FROM_EMAIL", "")
-    if not re.match(r'^[^@]+@[^@]+\.[^@]+$', from_email):
+    if not re.match(r"^[^@]+@[^@]+\.[^@]+$", from_email):
         logger.error("Invalid SMTP_FROM_EMAIL format: {}", from_email)
         return False
-    
+
     logger.info("SMTP config validated | host={} | port={}", SMTP_HOST, SMTP_PORT)
     return True
 
@@ -249,17 +254,17 @@ async def send_email_alert(
     missing_ppe: list[str],
     severity: str,
     timestamp: str,
-    image_bytes: Optional[bytes] = None,
+    image_bytes: bytes | None = None,
     camera_id: str = "CAM-01",
 ) -> bool:
     """
     Send an HTML email alert with optional inline violation image.
-    
+
     # FIXED: Input validation via Pydantic
     # FIXED: HTML sanitization to prevent XSS
     # IMPROVED: Retry logic with exponential backoff
     # IMPROVED: Proper MIME structure for better deliverability
-    
+
     Args:
         to_email    : Recipient email address.
         to_name     : Recipient display name.
@@ -271,14 +276,14 @@ async def send_email_alert(
         timestamp   : ISO timestamp string.
         image_bytes : Optional JPEG bytes to embed inline.
         camera_id   : Camera identifier.
-    
+
     Returns:
         True if sent successfully, False on error.
     """
     # Validate config first
     if not _SMTP_READY:
         return False
-    
+
     # Validate & sanitize input
     try:
         validated = EmailAlertInput(
@@ -296,45 +301,51 @@ async def send_email_alert(
     except Exception as e:
         logger.error("Invalid email alert input: {}", e)
         return False
-    
+
     try:
         subject = f"[{validated.severity}] PPE Violation — {validated.zone_name} — Track #{validated.track_id}"
-        
+
         # Build MIME message with proper structure
         msg = MIMEMultipart("related")
         msg["Subject"] = subject
         msg["From"] = f"{SMTP_FROM_NAME} <{SMTP_FROM_EMAIL}>"
         msg["To"] = f"{validated.to_name} <{validated.to_email}>"
-        msg["Date"] = datetime.now(timezone.utc).strftime("%a, %d %b %Y %H:%M:%S %z")  # RFC 2822
+        msg["Date"] = datetime.now(UTC).strftime("%a, %d %b %Y %H:%M:%S %z")  # RFC 2822
         msg["X-Priority"] = "1" if validated.severity == "CRITICAL" else "3"
         msg["X-Mailer"] = "SafetyMonitor-AI/1.0"
-        
+
         # HTML part
         html_part = MIMEText(
             _build_html_email(
-                validated.zone_name, validated.zone_type, validated.track_id,
-                validated.missing_ppe, validated.severity, validated.timestamp,
-                validated.camera_id, has_image=validated.image_bytes is not None,
+                validated.zone_name,
+                validated.zone_type,
+                validated.track_id,
+                validated.missing_ppe,
+                validated.severity,
+                validated.timestamp,
+                validated.camera_id,
+                has_image=validated.image_bytes is not None,
             ),
-            "html", "utf-8"
+            "html",
+            "utf-8",
         )
         html_part.add_header("Content-Disposition", "inline")
         msg.attach(html_part)
-        
+
         # Inline image attachment (if provided)
         if validated.image_bytes:
             img_part = MIMEImage(validated.image_bytes, "jpeg", name="violation.jpg")
             img_part.add_header("Content-ID", "<violation_frame>")
             img_part.add_header("Content-Disposition", "inline", filename="violation.jpg")
             msg.attach(img_part)
-        
+
         # Send with retry logic
         from tenacity import retry, stop_after_attempt, wait_exponential
-        
+
         @retry(
             stop=stop_after_attempt(3),
             wait=wait_exponential(multiplier=1, min=1, max=10),
-            reraise=True
+            reraise=True,
         )
         async def _send_with_retry():
             await aiosmtplib.send(
@@ -347,15 +358,17 @@ async def send_email_alert(
                 start_tls=not SMTP_USE_TLS,
                 timeout=SMTP_TIMEOUT_S,
             )
-        
+
         await _send_with_retry()
-        
+
         logger.info(
             "Email sent | to={} | severity={} | subject={}",
-            validated.to_email, validated.severity, subject,
+            validated.to_email,
+            validated.severity,
+            subject,
         )
         return True
-        
+
     except aiosmtplib.errors.SMTPException as exc:
         logger.error("SMTP error | to={} | error={}", validated.to_email, exc)
         return False

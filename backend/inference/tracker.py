@@ -18,7 +18,7 @@ from __future__ import annotations
 import re
 from collections import deque
 from dataclasses import dataclass, field
-from typing import List, Optional, Dict, Any
+from typing import Any
 
 import numpy as np
 import supervision as sv
@@ -39,15 +39,16 @@ class TrackedDetection:
     One detection in one frame, enriched with tracking info.
     All fields are plain Python types — safe to serialise to JSON.
     """
+
     track_id: int
     class_id: int
     class_name: str
     confidence: float
-    bbox_xyxy: List[float]  # [x1, y1, x2, y2] in pixels
-    bbox_xywh: List[float]  # [cx, cy, w, h] normalised 0-1
+    bbox_xyxy: list[float]  # [x1, y1, x2, y2] in pixels
+    bbox_xywh: list[float]  # [cx, cy, w, h] normalised 0-1
     frame_idx: int
     is_violation: bool  # True if class_name starts with "no-"
-    zone_id: Optional[str] = None
+    zone_id: str | None = None
 
     def __post_init__(self):
         # Validate fields
@@ -58,8 +59,8 @@ class TrackedDetection:
             raise ValueError(f"bbox_xyxy must have 4 values: {self.bbox_xyxy}")
         if len(self.bbox_xywh) != 4:
             raise ValueError(f"bbox_xywh must have 4 values: {self.bbox_xywh}")
-    
-    def to_dict(self) -> Dict[str, Any]:
+
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dict for JSON serialization."""
         return {
             "track_id": self.track_id,
@@ -80,6 +81,7 @@ class TrackHistory:
     Stores the recent trajectory of one track_id.
     Used for heatmap accumulation and dwell-time analysis.
     """
+
     track_id: int
     class_name: str
     centroids: deque = field(default_factory=lambda: deque(maxlen=_MAX_HISTORY_LEN))
@@ -97,8 +99,8 @@ class TrackHistory:
         if self.total_frames == 0:
             return 0.0
         return self.violation_frames / self.total_frames
-    
-    def to_dict(self) -> Dict[str, Any]:
+
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dict for JSON serialization."""
         return {
             "track_id": self.track_id,
@@ -123,7 +125,7 @@ class ByteTracker:
     # FIXED: Input validation + sanitization
     # IMPROVED: Memory-efficient history with bounded deques
     # FIXED: Frame size validation to prevent division by zero
-    
+
     Usage:
         tracker = ByteTracker(class_names=["helmet", "no-helmet", ...])
         tracked = tracker.update(yolo_result, frame_idx=42)
@@ -135,12 +137,12 @@ class ByteTracker:
 
     def __init__(
         self,
-        class_names: List[str],
+        class_names: list[str],
         track_thresh: float = 0.45,
         track_buffer: int = 30,
         match_thresh: float = 0.80,
         frame_rate: int = 30,
-        violation_classes: Optional[List[str]] = None,
+        violation_classes: list[str] | None = None,
         max_history_len: int = _MAX_HISTORY_LEN,
     ):
         # ── Input validation — fail fast ──────────────────────
@@ -148,13 +150,11 @@ class ByteTracker:
             raise ValueError("class_names must be a non-empty list")
         if not (_MIN_THRESH <= track_thresh <= _MAX_THRESH):
             raise ValueError(
-                f"track_thresh must be in [{_MIN_THRESH}, {_MAX_THRESH}], "
-                f"got {track_thresh}"
+                f"track_thresh must be in [{_MIN_THRESH}, {_MAX_THRESH}], " f"got {track_thresh}"
             )
         if not (_MIN_THRESH <= match_thresh <= _MAX_THRESH):
             raise ValueError(
-                f"match_thresh must be in [{_MIN_THRESH}, {_MAX_THRESH}], "
-                f"got {match_thresh}"
+                f"match_thresh must be in [{_MIN_THRESH}, {_MAX_THRESH}], " f"got {match_thresh}"
             )
         if track_buffer < _MIN_BUFFER:
             raise ValueError(f"track_buffer must be >= {_MIN_BUFFER}, got {track_buffer}")
@@ -179,24 +179,26 @@ class ByteTracker:
             frame_rate=frame_rate,
         )
 
-        self._histories: Dict[int, TrackHistory] = {}
-        self._zones: Dict[str, np.ndarray] = {}
+        self._histories: dict[int, TrackHistory] = {}
+        self._zones: dict[str, np.ndarray] = {}
         self._max_history_len = max_history_len
 
         logger.info(
             "ByteTracker initialised | classes={} | violation classes={} | history_len={}",
-            len(class_names), self.violation_classes, max_history_len,
+            len(class_names),
+            self.violation_classes,
+            max_history_len,
         )
 
     # ── Zone management ───────────────────────────────────────
 
     def register_zone(self, zone_id: str, polygon: np.ndarray) -> None:
         # Validate inputs
-        if not re.match(r'^[a-zA-Z0-9_\-]+$', zone_id):
+        if not re.match(r"^[a-zA-Z0-9_\-]+$", zone_id):
             raise ValueError(f"Invalid zone_id format: {zone_id}")
         if polygon.ndim != 2 or polygon.shape[1] != 2:
             raise ValueError(f"Polygon must be (N, 2) array, got {polygon.shape}")
-        
+
         self._zones[zone_id] = polygon
         logger.debug("Zone registered: {} | vertices={}", zone_id, len(polygon))
 
@@ -220,8 +222,9 @@ class ByteTracker:
         self._zones.clear()
         logger.debug("All zones cleared from tracker")
 
-    def _assign_zone(self, cx: float, cy: float) -> Optional[str]:
+    def _assign_zone(self, cx: float, cy: float) -> str | None:
         import cv2
+
         for zone_id, poly in self._zones.items():
             dist = cv2.pointPolygonTest(
                 poly.astype(np.float32),
@@ -238,8 +241,8 @@ class ByteTracker:
         self,
         yolo_result,
         frame_idx: int = 0,
-        frame_wh: Optional[tuple] = None,
-    ) -> List[TrackedDetection]:
+        frame_wh: tuple | None = None,
+    ) -> list[TrackedDetection]:
         if yolo_result.boxes is None or len(yolo_result.boxes.xyxy) == 0:
             return []
 
@@ -248,7 +251,9 @@ class ByteTracker:
         if fw <= 0 or fh <= 0:
             logger.warning(
                 "update: invalid frame size {}x{} — skipping frame {}",
-                fw, fh, frame_idx,
+                fw,
+                fh,
+                frame_idx,
             )
             return []
 
@@ -263,17 +268,12 @@ class ByteTracker:
     def _resolve_frame_size(
         self,
         yolo_result,
-        frame_wh: Optional[tuple],
+        frame_wh: tuple | None,
     ) -> tuple[int, int]:
         """Return (fw, fh) from explicit override or yolo_result.orig_shape."""
         if frame_wh is not None:
-            if (
-                not isinstance(frame_wh, (tuple, list))
-                or len(frame_wh) != 2
-            ):
-                raise ValueError(
-                    f"frame_wh must be a 2-tuple (width, height), got {frame_wh!r}"
-                )
+            if not isinstance(frame_wh, tuple | list) or len(frame_wh) != 2:
+                raise ValueError(f"frame_wh must be a 2-tuple (width, height), got {frame_wh!r}")
             fw, fh = int(frame_wh[0]), int(frame_wh[1])
             if fw <= 0 or fh <= 0:
                 raise ValueError(f"frame_wh must be positive, got {frame_wh}")
@@ -295,9 +295,9 @@ class ByteTracker:
         frame_idx: int,
         fw: int,
         fh: int,
-    ) -> List[TrackedDetection]:
+    ) -> list[TrackedDetection]:
         """Convert supervision Detections to TrackedDetection list."""
-        output: List[TrackedDetection] = []
+        output: list[TrackedDetection] = []
 
         for i in range(len(tracked_sv)):
             tid = int(tracked_sv.tracker_id[i])
@@ -309,10 +309,10 @@ class ByteTracker:
             if cid >= self.n_classes:
                 logger.warning(
                     "Unknown class_id {} (n_classes={}) — using fallback name",
-                    cid, self.n_classes,
+                    cid,
+                    self.n_classes,
                 )
-            cname = (self.class_names[cid]
-                     if cid < self.n_classes else f"class_{cid}")
+            cname = self.class_names[cid] if cid < self.n_classes else f"class_{cid}"
             is_viol = cname in self.violation_classes
 
             x1, y1, x2, y2 = xyxy
@@ -329,17 +329,19 @@ class ByteTracker:
             zone_id = self._assign_zone(cx, cy)
             self._update_history(tid, cname, cx, cy, is_viol, frame_idx)
 
-            output.append(TrackedDetection(
-                track_id=tid,
-                class_id=cid,
-                class_name=cname,
-                confidence=conf,
-                bbox_xyxy=xyxy,
-                bbox_xywh=xywh,
-                frame_idx=frame_idx,
-                is_violation=is_viol,
-                zone_id=zone_id,
-            ))
+            output.append(
+                TrackedDetection(
+                    track_id=tid,
+                    class_id=cid,
+                    class_name=cname,
+                    confidence=conf,
+                    bbox_xyxy=xyxy,
+                    bbox_xywh=xywh,
+                    frame_idx=frame_idx,
+                    is_violation=is_viol,
+                    zone_id=zone_id,
+                )
+            )
 
         return output
 
@@ -356,9 +358,9 @@ class ByteTracker:
     ) -> None:
         if not isinstance(track_id, int):
             logger.warning(
-                "_update_history: unexpected track_id type "
-                "{} (value={!r}) — skipping",
-                type(track_id), track_id,
+                "_update_history: unexpected track_id type " "{} (value={!r}) — skipping",
+                type(track_id),
+                track_id,
             )
             return
 
@@ -379,14 +381,14 @@ class ByteTracker:
         if is_viol:
             h.violation_frames += 1
 
-    def get_history(self, track_id: int) -> Optional[TrackHistory]:
+    def get_history(self, track_id: int) -> TrackHistory | None:
         return self._histories.get(track_id)
 
-    def get_all_histories(self) -> Dict[int, TrackHistory]:
+    def get_all_histories(self) -> dict[int, TrackHistory]:
         # Shallow copy — callers must not mutate TrackHistory objects
         return dict(self._histories)
 
-    def get_active_track_ids(self) -> List[int]:
+    def get_active_track_ids(self) -> list[int]:
         """
         Returns track IDs currently held by ByteTrack.
         Uses the public tracked_stracks attribute; guarded with hasattr

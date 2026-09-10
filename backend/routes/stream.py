@@ -18,15 +18,14 @@ import asyncio
 import base64
 import json
 import os
-from typing import Set
 
 import cv2
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from loguru import logger
 from pydantic import BaseModel, Field
 
-from ..state import app_state
 from ..models import StreamFrameMessage
+from ..state import app_state
 
 router = APIRouter(tags=["stream"])
 
@@ -38,6 +37,7 @@ _MAX_CONNECTIONS: int = int(os.getenv("WS_MAX_CONNECTIONS", "10"))
 
 class StreamStatsOut(BaseModel):
     """WebSocket stream connection statistics."""
+
     connected_clients: int = Field(ge=0, description="Number of active WebSocket connections")
     pipeline_fps: float = Field(ge=0.0, description="Current inference pipeline FPS")
 
@@ -46,14 +46,14 @@ class ConnectionManager:
     """Thread-safe WebSocket connection registry with connection limit."""
 
     def __init__(self, max_connections: int = _MAX_CONNECTIONS) -> None:
-        self._connections: Set[WebSocket] = set()
+        self._connections: set[WebSocket] = set()
         self._lock: asyncio.Lock = asyncio.Lock()
         self._max_connections: int = max_connections
 
     async def connect(self, ws: WebSocket) -> bool:
         """
         Accept a WebSocket connection.
-        
+
         Returns:
             True if connection accepted, False if rejected.
         """
@@ -132,9 +132,7 @@ async def video_stream(ws: WebSocket) -> None:
         while True:
             # Handle incoming client messages
             try:
-                raw = await asyncio.wait_for(
-                    ws.receive_text(), timeout=0.01
-                )
+                raw = await asyncio.wait_for(ws.receive_text(), timeout=0.01)
                 if len(raw) <= _MAX_MESSAGE_LEN:
                     try:
                         msg = json.loads(raw)
@@ -144,7 +142,7 @@ async def video_stream(ws: WebSocket) -> None:
                         logger.debug("WS: malformed JSON — ignoring")
                 else:
                     logger.warning("WS: message too large ({} bytes)", len(raw))
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass
             except WebSocketDisconnect:
                 break
@@ -172,7 +170,8 @@ async def video_stream(ws: WebSocket) -> None:
             success, jpeg_buf = await loop.run_in_executor(
                 None,
                 lambda: cv2.imencode(
-                    ".jpg", frame_bgr,
+                    ".jpg",
+                    frame_bgr,  # noqa: B023
                     [cv2.IMWRITE_JPEG_QUALITY, _JPEG_QUALITY],
                 ),
             )
@@ -219,10 +218,7 @@ async def stream_stats() -> StreamStatsOut:
     """Current WebSocket connection count and pipeline FPS."""
     return StreamStatsOut(
         connected_clients=manager.count,
-        pipeline_fps=(
-            app_state.get_latest_frame().fps
-            if app_state.get_latest_frame() else 0.0
-        ),
+        pipeline_fps=(app_state.get_latest_frame().fps if app_state.get_latest_frame() else 0.0),
     )
 
 
