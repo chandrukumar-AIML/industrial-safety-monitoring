@@ -10,6 +10,7 @@ Coverage:
   - GET /export/workers.csv → returns CSV
   - Audit entries have required OSHA fields
 """
+
 from __future__ import annotations
 
 import pytest
@@ -37,9 +38,9 @@ async def test_violations_csv_export(client):
     resp = await client.get("/export/violations.csv")
     assert resp.status_code == 200
     content_type = resp.headers.get("content-type", "")
-    assert "text/csv" in content_type or "application/octet-stream" in content_type, (
-        f"Expected CSV content-type, got: {content_type}"
-    )
+    assert (
+        "text/csv" in content_type or "application/octet-stream" in content_type
+    ), f"Expected CSV content-type, got: {content_type}"
 
 
 @pytest.mark.asyncio
@@ -55,6 +56,7 @@ async def test_workers_csv_export(client):
 async def test_audit_without_auth_blocked(unauth_client):
     """Audit log must be protected — OSHA compliance requires access control."""
     resp = await unauth_client.get("/audit")
-    assert resp.status_code in {401, 403}, (
-        f"Audit log must be protected but returned {resp.status_code}"
-    )
+    assert resp.status_code in {
+        401,
+        403,
+    }, f"Audit log must be protected but returned {resp.status_code}"

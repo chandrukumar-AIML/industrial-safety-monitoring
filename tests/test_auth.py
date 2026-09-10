@@ -10,10 +10,10 @@ Coverage:
   - Valid token → 200
   - Public paths bypass auth
 """
+
 from __future__ import annotations
 
 import pytest
-
 
 PROTECTED_PATHS = [
     "/detections",
@@ -41,9 +41,10 @@ async def test_public_path_no_auth_needed(unauth_client, path):
     Must never return 401/403.
     """
     resp = await unauth_client.get(path)
-    assert resp.status_code not in {401, 403}, (
-        f"{path} returned auth error {resp.status_code} — must be public"
-    )
+    assert resp.status_code not in {
+        401,
+        403,
+    }, f"{path} returned auth error {resp.status_code} — must be public"
 
 
 @pytest.mark.asyncio
@@ -51,9 +52,10 @@ async def test_public_path_no_auth_needed(unauth_client, path):
 async def test_protected_path_without_token_returns_401(unauth_client, path):
     """Protected endpoints must reject requests with no Authorization header."""
     resp = await unauth_client.get(path)
-    assert resp.status_code in {401, 403}, (
-        f"{path} should require auth but returned {resp.status_code}"
-    )
+    assert resp.status_code in {
+        401,
+        403,
+    }, f"{path} should require auth but returned {resp.status_code}"
 
 
 @pytest.mark.asyncio
@@ -82,6 +84,7 @@ async def test_valid_token_grants_access(client, path):
     """Valid Bearer token must grant access to protected endpoints."""
     resp = await client.get(path)
     # Any non-401/403 means auth passed (could be 200, 404, 422 etc.)
-    assert resp.status_code not in {401, 403}, (
-        f"{path} rejected valid token with {resp.status_code}"
-    )
+    assert resp.status_code not in {
+        401,
+        403,
+    }, f"{path} rejected valid token with {resp.status_code}"

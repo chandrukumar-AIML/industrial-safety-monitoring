@@ -7,27 +7,30 @@ escalation, permits, attendance.
 Covers all 6 new enterprise route modules.
 66 existing tests + these = 100+ tests total.
 """
+
 from __future__ import annotations
 
 import pytest
-
 
 # ═══════════════════════════════════════════════════════════════
 # ORGANIZATIONS
 # ═══════════════════════════════════════════════════════════════
 
-class TestOrganizations:
 
+class TestOrganizations:
     @pytest.mark.asyncio
     async def test_create_organization(self, client):
         """POST /organizations creates a new org."""
-        resp = await client.post("/organizations", json={
-            "org_name": "Test Steel Plant Ltd",
-            "industry_type": "steel_manufacturing",
-            "country": "IN",
-            "plan": "starter",
-            "admin_email": "admin@testplant.com",
-        })
+        resp = await client.post(
+            "/organizations",
+            json={
+                "org_name": "Test Steel Plant Ltd",
+                "industry_type": "steel_manufacturing",
+                "country": "IN",
+                "plan": "starter",
+                "admin_email": "admin@testplant.com",
+            },
+        )
         assert resp.status_code == 201, resp.text
         data = resp.json()
         assert "org_id" in data
@@ -55,11 +58,14 @@ class TestOrganizations:
     async def test_get_organization_found(self, client):
         """Create then retrieve an org by org_id."""
         # Create
-        create_resp = await client.post("/organizations", json={
-            "org_name": "Pharma Industries Pvt Ltd",
-            "industry_type": "pharma",
-            "plan": "growth",
-        })
+        create_resp = await client.post(
+            "/organizations",
+            json={
+                "org_name": "Pharma Industries Pvt Ltd",
+                "industry_type": "pharma",
+                "plan": "growth",
+            },
+        )
         assert create_resp.status_code == 201
         org_id = create_resp.json()["org_id"]
 
@@ -73,16 +79,22 @@ class TestOrganizations:
     @pytest.mark.asyncio
     async def test_update_organization(self, client):
         """PATCH /organizations/{org_id} updates fields."""
-        create_resp = await client.post("/organizations", json={
-            "org_name": "Old Name Corp",
-            "plan": "starter",
-        })
+        create_resp = await client.post(
+            "/organizations",
+            json={
+                "org_name": "Old Name Corp",
+                "plan": "starter",
+            },
+        )
         org_id = create_resp.json()["org_id"]
 
-        patch_resp = await client.patch(f"/organizations/{org_id}", json={
-            "org_name": "New Name Corp",
-            "max_cameras": 20,
-        })
+        patch_resp = await client.patch(
+            f"/organizations/{org_id}",
+            json={
+                "org_name": "New Name Corp",
+                "max_cameras": 20,
+            },
+        )
         assert patch_resp.status_code == 200
         data = patch_resp.json()
         assert data["status"] == "ok"
@@ -90,10 +102,13 @@ class TestOrganizations:
     @pytest.mark.asyncio
     async def test_organization_usage(self, client):
         """GET /organizations/{org_id}/usage returns usage stats."""
-        create_resp = await client.post("/organizations", json={
-            "org_name": "Usage Test Corp",
-            "plan": "enterprise",
-        })
+        create_resp = await client.post(
+            "/organizations",
+            json={
+                "org_name": "Usage Test Corp",
+                "plan": "enterprise",
+            },
+        )
         org_id = create_resp.json()["org_id"]
 
         usage_resp = await client.get(f"/organizations/{org_id}/usage")
@@ -126,10 +141,13 @@ class TestOrganizations:
     @pytest.mark.asyncio
     async def test_org_invalid_plan_rejected(self, client):
         """POST /organizations with invalid plan returns 422."""
-        resp = await client.post("/organizations", json={
-            "org_name": "Bad Plan Corp",
-            "plan": "diamond",  # invalid
-        })
+        resp = await client.post(
+            "/organizations",
+            json={
+                "org_name": "Bad Plan Corp",
+                "plan": "diamond",  # invalid
+            },
+        )
         assert resp.status_code == 422
 
 
@@ -137,8 +155,8 @@ class TestOrganizations:
 # BILLING
 # ═══════════════════════════════════════════════════════════════
 
-class TestBilling:
 
+class TestBilling:
     @pytest.mark.asyncio
     async def test_list_plans(self, client):
         """GET /billing/plans returns all 3 plans."""
@@ -168,11 +186,14 @@ class TestBilling:
         org_resp = await client.post("/organizations", json={"org_name": "Billing Test Co"})
         org_id = org_resp.json()["org_id"]
 
-        resp = await client.post("/billing/subscribe", json={
-            "org_id": org_id,
-            "plan": "growth",
-            "billing_cycle": "monthly",
-        })
+        resp = await client.post(
+            "/billing/subscribe",
+            json={
+                "org_id": org_id,
+                "plan": "growth",
+                "billing_cycle": "monthly",
+            },
+        )
         assert resp.status_code == 201
         data = resp.json()
         assert data["plan"] == "growth"
@@ -204,9 +225,10 @@ class TestBilling:
         org_id = org_resp.json()["org_id"]
 
         # Subscribe first
-        await client.post("/billing/subscribe", json={
-            "org_id": org_id, "plan": "starter", "billing_cycle": "monthly"
-        })
+        await client.post(
+            "/billing/subscribe",
+            json={"org_id": org_id, "plan": "starter", "billing_cycle": "monthly"},
+        )
 
         cancel_resp = await client.post(f"/billing/cancel/{org_id}")
         assert cancel_resp.status_code == 200
@@ -217,8 +239,8 @@ class TestBilling:
 # INDUSTRY PPE
 # ═══════════════════════════════════════════════════════════════
 
-class TestIndustryPPE:
 
+class TestIndustryPPE:
     @pytest.mark.asyncio
     async def test_seed_profiles(self, client):
         """POST /industry-ppe/seed inserts default profiles."""
@@ -304,13 +326,16 @@ class TestIndustryPPE:
     @pytest.mark.asyncio
     async def test_create_custom_profile(self, client):
         """POST /industry-ppe/profiles creates a custom profile."""
-        resp = await client.post("/industry-ppe/profiles", json={
-            "industry_type": "textile",
-            "zone_type": "dyeing",
-            "required_ppe": ["no gloves", "no mask", "no goggles"],
-            "risk_level": "HIGH",
-            "compliance_standard": "Factories Act 1948",
-        })
+        resp = await client.post(
+            "/industry-ppe/profiles",
+            json={
+                "industry_type": "textile",
+                "zone_type": "dyeing",
+                "required_ppe": ["no gloves", "no mask", "no goggles"],
+                "risk_level": "HIGH",
+                "compliance_standard": "Factories Act 1948",
+            },
+        )
         assert resp.status_code == 201
         data = resp.json()
         assert data["industry_type"] == "textile"
@@ -320,8 +345,8 @@ class TestIndustryPPE:
 # ESCALATION
 # ═══════════════════════════════════════════════════════════════
 
-class TestEscalation:
 
+class TestEscalation:
     @pytest.mark.asyncio
     async def test_list_open_escalations_empty(self, client):
         """GET /escalation/open returns empty list initially."""
@@ -369,18 +394,21 @@ class TestEscalation:
 # PERMITS TO WORK
 # ═══════════════════════════════════════════════════════════════
 
-class TestPermits:
 
+class TestPermits:
     @pytest.mark.asyncio
     async def test_request_permit(self, client):
         """POST /permits creates a pending permit."""
-        resp = await client.post("/permits", json={
-            "work_type": "hot_work",
-            "zone_id": "furnace-zone-1",
-            "worker_id": "W-001",
-            "supervisor_id": "S-001",
-            "org_id": "test-org",
-        })
+        resp = await client.post(
+            "/permits",
+            json={
+                "work_type": "hot_work",
+                "zone_id": "furnace-zone-1",
+                "worker_id": "W-001",
+                "supervisor_id": "S-001",
+                "org_id": "test-org",
+            },
+        )
         assert resp.status_code == 201
         data = resp.json()
         assert "permit_id" in data
@@ -391,10 +419,13 @@ class TestPermits:
     @pytest.mark.asyncio
     async def test_request_invalid_work_type(self, client):
         """POST /permits with invalid work_type returns 400."""
-        resp = await client.post("/permits", json={
-            "work_type": "flying_cars",
-            "worker_id": "W-001",
-        })
+        resp = await client.post(
+            "/permits",
+            json={
+                "work_type": "flying_cars",
+                "worker_id": "W-001",
+            },
+        )
         assert resp.status_code == 400
 
     @pytest.mark.asyncio
@@ -410,17 +441,23 @@ class TestPermits:
     async def test_approve_permit(self, client):
         """POST /permits/{id}/approve sets status to active."""
         # Create
-        create_resp = await client.post("/permits", json={
-            "work_type": "confined_space",
-            "worker_id": "W-002",
-        })
+        create_resp = await client.post(
+            "/permits",
+            json={
+                "work_type": "confined_space",
+                "worker_id": "W-002",
+            },
+        )
         permit_id = create_resp.json()["permit_id"]
 
         # Approve
-        approve_resp = await client.post(f"/permits/{permit_id}/approve", json={
-            "approved_by": "safety-officer-001",
-            "valid_hours": 8,
-        })
+        approve_resp = await client.post(
+            f"/permits/{permit_id}/approve",
+            json={
+                "approved_by": "safety-officer-001",
+                "valid_hours": 8,
+            },
+        )
         assert approve_resp.status_code == 200
         data = approve_resp.json()
         assert data["status"] == "active"
@@ -430,14 +467,22 @@ class TestPermits:
     @pytest.mark.asyncio
     async def test_validate_permit_active(self, client):
         """GET /permits/validate/{id} returns allowed=true for active permit."""
-        create_resp = await client.post("/permits", json={
-            "work_type": "electrical", "worker_id": "W-003",
-        })
+        create_resp = await client.post(
+            "/permits",
+            json={
+                "work_type": "electrical",
+                "worker_id": "W-003",
+            },
+        )
         permit_id = create_resp.json()["permit_id"]
 
-        await client.post(f"/permits/{permit_id}/approve", json={
-            "approved_by": "supervisor-001", "valid_hours": 4,
-        })
+        await client.post(
+            f"/permits/{permit_id}/approve",
+            json={
+                "approved_by": "supervisor-001",
+                "valid_hours": 4,
+            },
+        )
 
         validate_resp = await client.get(f"/permits/validate/{permit_id}")
         assert validate_resp.status_code == 200
@@ -446,9 +491,13 @@ class TestPermits:
     @pytest.mark.asyncio
     async def test_validate_permit_pending(self, client):
         """Pending permit (not approved) → allowed=false."""
-        create_resp = await client.post("/permits", json={
-            "work_type": "height_work", "worker_id": "W-004",
-        })
+        create_resp = await client.post(
+            "/permits",
+            json={
+                "work_type": "height_work",
+                "worker_id": "W-004",
+            },
+        )
         permit_id = create_resp.json()["permit_id"]
 
         validate_resp = await client.get(f"/permits/validate/{permit_id}")
@@ -457,9 +506,13 @@ class TestPermits:
     @pytest.mark.asyncio
     async def test_cancel_permit(self, client):
         """POST /permits/{id}/cancel returns cancelled."""
-        create_resp = await client.post("/permits", json={
-            "work_type": "chemical", "worker_id": "W-005",
-        })
+        create_resp = await client.post(
+            "/permits",
+            json={
+                "work_type": "chemical",
+                "worker_id": "W-005",
+            },
+        )
         permit_id = create_resp.json()["permit_id"]
 
         cancel_resp = await client.post(f"/permits/{permit_id}/cancel")
@@ -469,13 +522,21 @@ class TestPermits:
     @pytest.mark.asyncio
     async def test_close_permit(self, client):
         """POST /permits/{id}/close on active permit returns closed."""
-        create_resp = await client.post("/permits", json={
-            "work_type": "general", "worker_id": "W-006",
-        })
+        create_resp = await client.post(
+            "/permits",
+            json={
+                "work_type": "general",
+                "worker_id": "W-006",
+            },
+        )
         permit_id = create_resp.json()["permit_id"]
-        await client.post(f"/permits/{permit_id}/approve", json={
-            "approved_by": "sup-001", "valid_hours": 2,
-        })
+        await client.post(
+            f"/permits/{permit_id}/approve",
+            json={
+                "approved_by": "sup-001",
+                "valid_hours": 2,
+            },
+        )
 
         close_resp = await client.post(f"/permits/{permit_id}/close")
         assert close_resp.status_code == 200
@@ -493,17 +554,20 @@ class TestPermits:
 # ATTENDANCE
 # ═══════════════════════════════════════════════════════════════
 
-class TestAttendance:
 
+class TestAttendance:
     @pytest.mark.asyncio
     async def test_check_in(self, client):
         """POST /attendance/checkin records worker check-in."""
-        resp = await client.post("/attendance/checkin", json={
-            "worker_id": "ATT-W-001",
-            "site_id": "plant-1",
-            "entry_method": "manual",
-            "org_id": "test-org",
-        })
+        resp = await client.post(
+            "/attendance/checkin",
+            json={
+                "worker_id": "ATT-W-001",
+                "site_id": "plant-1",
+                "entry_method": "manual",
+                "org_id": "test-org",
+            },
+        )
         assert resp.status_code == 201
         data = resp.json()
         assert data["worker_id"] == "ATT-W-001"
@@ -513,23 +577,29 @@ class TestAttendance:
     @pytest.mark.asyncio
     async def test_double_checkin_rejected(self, client):
         """Second check-in without checkout returns 409."""
-        await client.post("/attendance/checkin", json={
-            "worker_id": "ATT-W-002", "site_id": "plant-1", "entry_method": "manual"
-        })
-        resp2 = await client.post("/attendance/checkin", json={
-            "worker_id": "ATT-W-002", "site_id": "plant-1", "entry_method": "manual"
-        })
+        await client.post(
+            "/attendance/checkin",
+            json={"worker_id": "ATT-W-002", "site_id": "plant-1", "entry_method": "manual"},
+        )
+        resp2 = await client.post(
+            "/attendance/checkin",
+            json={"worker_id": "ATT-W-002", "site_id": "plant-1", "entry_method": "manual"},
+        )
         assert resp2.status_code == 409
 
     @pytest.mark.asyncio
     async def test_check_out(self, client):
         """POST /attendance/checkout closes check-in and calculates hours."""
-        await client.post("/attendance/checkin", json={
-            "worker_id": "ATT-W-003", "site_id": "plant-1", "entry_method": "manual"
-        })
-        resp = await client.post("/attendance/checkout", json={
-            "worker_id": "ATT-W-003",
-        })
+        await client.post(
+            "/attendance/checkin",
+            json={"worker_id": "ATT-W-003", "site_id": "plant-1", "entry_method": "manual"},
+        )
+        resp = await client.post(
+            "/attendance/checkout",
+            json={
+                "worker_id": "ATT-W-003",
+            },
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "checked_out"
@@ -540,18 +610,22 @@ class TestAttendance:
     @pytest.mark.asyncio
     async def test_checkout_no_checkin_returns_404(self, client):
         """Checkout without checkin returns 404."""
-        resp = await client.post("/attendance/checkout", json={
-            "worker_id": "NOBODY-XXXX-9999",
-        })
+        resp = await client.post(
+            "/attendance/checkout",
+            json={
+                "worker_id": "NOBODY-XXXX-9999",
+            },
+        )
         assert resp.status_code == 404
 
     @pytest.mark.asyncio
     async def test_headcount(self, client):
         """GET /attendance/headcount returns count of on-site workers."""
         # Check-in a worker
-        await client.post("/attendance/checkin", json={
-            "worker_id": "ATT-W-HCOUNT", "site_id": "site-hcount", "entry_method": "manual"
-        })
+        await client.post(
+            "/attendance/checkin",
+            json={"worker_id": "ATT-W-HCOUNT", "site_id": "site-hcount", "entry_method": "manual"},
+        )
         resp = await client.get("/attendance/headcount?site_id=site-hcount")
         assert resp.status_code == 200
         data = resp.json()

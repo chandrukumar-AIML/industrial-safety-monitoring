@@ -10,6 +10,7 @@ Coverage:
   - POST /shifts → create shift
   - GET /shifts → list
 """
+
 from __future__ import annotations
 
 import pytest

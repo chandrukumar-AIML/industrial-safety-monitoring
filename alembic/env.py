@@ -17,14 +17,16 @@ Usage:
   alembic history                                # show all migrations
   alembic upgrade head --sql                     # preview SQL without running
 """
+
 from __future__ import annotations
 
 import os
 from logging.config import fileConfig
 
-from sqlalchemy import engine_from_config, pool
-from alembic import context
 from dotenv import load_dotenv
+from sqlalchemy import engine_from_config, pool
+
+from alembic import context
 
 # Load .env so DATABASE_URL is available when running from CLI
 load_dotenv()
@@ -40,12 +42,14 @@ if config.config_file_name is not None:
 # This populates SQLModel.metadata so autogenerate works correctly.
 # Add any new models here when you create them.
 from sqlmodel import SQLModel
+
 import backend.models  # noqa: F401 — registers all table classes
 
 target_metadata = SQLModel.metadata
 
 
 # ── Database URL ─────────────────────────────────────────────
+
 
 def _sync_url(url: str) -> str:
     """
@@ -74,6 +78,7 @@ config.set_main_option("sqlalchemy.url", SYNC_URL)
 
 
 # ── Migration functions ───────────────────────────────────────
+
 
 def run_migrations_offline() -> None:
     """

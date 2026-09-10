@@ -11,6 +11,7 @@ Coverage:
   - Filter by class_name
   - /detections/stats shape
 """
+
 from __future__ import annotations
 
 import pytest
@@ -55,9 +56,9 @@ async def test_detections_class_filter(client):
     assert resp.status_code == 200
     data = resp.json()
     for item in data:
-        assert item["class_name"] == "no helmet", (
-            f"Filter broke: got class_name={item['class_name']}"
-        )
+        assert (
+            item["class_name"] == "no helmet"
+        ), f"Filter broke: got class_name={item['class_name']}"
 
 
 @pytest.mark.asyncio
@@ -66,6 +67,6 @@ async def test_detections_stats_shape(client):
     resp = await client.get("/detections/stats")
     assert resp.status_code == 200
     data = resp.json()
-    assert "total_violations" in data or "by_class" in data, (
-        f"Stats response missing expected keys: {list(data.keys())}"
-    )
+    assert (
+        "total_violations" in data or "by_class" in data
+    ), f"Stats response missing expected keys: {list(data.keys())}"

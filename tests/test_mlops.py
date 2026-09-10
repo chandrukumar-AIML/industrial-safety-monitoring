@@ -9,6 +9,7 @@ Coverage:
   - GET /mlops/canary/status → canary deployment info
   - asyncio import regression (canary_router.py)
 """
+
 from __future__ import annotations
 
 import pytest

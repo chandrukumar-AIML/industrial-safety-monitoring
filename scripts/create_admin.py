@@ -11,8 +11,9 @@ Set env vars before running:
     DATABASE_URL=postgresql+asyncpg://user:pass@host:5432/dbname
     JWT_SECRET=your-secret-key
 """
-import asyncio
+
 import argparse
+import asyncio
 import os
 import sys
 from pathlib import Path
@@ -22,12 +23,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 try:
     from dotenv import load_dotenv
+
     load_dotenv()
 except ImportError:
     pass
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
+
 from backend.auth.jwt_utils import hash_password
 
 
@@ -65,10 +68,10 @@ async def create_admin(email: str, password: str, full_name: str, org_id: str):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Create the first admin user")
-    parser.add_argument("--email",    default=os.getenv("ADMIN_EMAIL", "admin@safeguardai.io"))
+    parser.add_argument("--email", default=os.getenv("ADMIN_EMAIL", "admin@safeguardai.io"))
     parser.add_argument("--password", default=os.getenv("ADMIN_PASSWORD", ""))
-    parser.add_argument("--name",     default=os.getenv("ADMIN_NAME", "Admin"))
-    parser.add_argument("--org",      default=os.getenv("ADMIN_ORG", "default"))
+    parser.add_argument("--name", default=os.getenv("ADMIN_NAME", "Admin"))
+    parser.add_argument("--org", default=os.getenv("ADMIN_ORG", "default"))
     args = parser.parse_args()
 
     if not args.password:

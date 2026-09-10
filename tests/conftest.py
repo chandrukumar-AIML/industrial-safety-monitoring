@@ -8,10 +8,11 @@ Strategy:
   - App's own init_db() creates all tables
   - Cleanup the test DB file after session
 """
+
 from __future__ import annotations
 
 import os
-import pytest
+
 import pytest_asyncio
 
 # Use a dedicated file-based test DB (not :memory: — doesn't share across connections)
@@ -37,7 +38,8 @@ async def init_test_database():
     Initialize the test database once per session.
     Uses the app's own init_db() to create all tables.
     """
-    from backend.database import init_db, engine
+    from backend.database import engine, init_db
+
     await init_db(engine)
     yield
     # Cleanup: dispose engine and remove test DB file
@@ -55,7 +57,8 @@ async def client():
     Async HTTP client with Bearer auth header pre-set.
     ASGI transport — no real HTTP server needed.
     """
-    from httpx import AsyncClient, ASGITransport
+    from httpx import ASGITransport, AsyncClient
+
     from backend.main import app
 
     async with AsyncClient(
@@ -69,7 +72,8 @@ async def client():
 @pytest_asyncio.fixture
 async def unauth_client():
     """Client with NO auth header — for testing 401/403 responses."""
-    from httpx import AsyncClient, ASGITransport
+    from httpx import ASGITransport, AsyncClient
+
     from backend.main import app
 
     async with AsyncClient(

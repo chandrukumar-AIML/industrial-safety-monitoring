@@ -11,6 +11,7 @@ Coverage:
   - GET /workers/dashboard/risk → dashboard shape
   - Route ordering: dashboard/risk not swallowed by /{id}/risk
 """
+
 from __future__ import annotations
 
 import pytest
@@ -73,9 +74,9 @@ async def test_dashboard_risk_not_caught_by_worker_id_route(client):
     data = resp.json()
     # Dashboard returns a dict with aggregate fields, not a single risk object
     # If it was wrongly matched by /{worker_id}/risk, worker_id would be "dashboard"
-    assert data.get("worker_id") != "dashboard", (
-        "Route ordering bug: /dashboard/risk was matched by /{worker_id}/risk!"
-    )
+    assert (
+        data.get("worker_id") != "dashboard"
+    ), "Route ordering bug: /dashboard/risk was matched by /{worker_id}/risk!"
 
 
 @pytest.mark.asyncio

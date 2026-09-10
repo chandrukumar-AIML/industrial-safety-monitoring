@@ -9,6 +9,7 @@ Coverage:
   - POST /cameras → register camera (rtsp:// URL must be accepted)
   - Pydantic regression: HttpUrl vs str for rtsp scheme
 """
+
 from __future__ import annotations
 
 import pytest
@@ -37,9 +38,10 @@ async def test_create_camera_rtsp_url_accepted(client):
     }
     resp = await client.post("/cameras", json=payload)
     # 200/201 = created; 500 would indicate the rtsp:// Pydantic bug is back
-    assert resp.status_code in {200, 201}, (
-        f"rtsp:// URL rejected — possible Pydantic HttpUrl regression: {resp.text}"
-    )
+    assert resp.status_code in {
+        200,
+        201,
+    }, f"rtsp:// URL rejected — possible Pydantic HttpUrl regression: {resp.text}"
 
 
 @pytest.mark.asyncio
@@ -52,9 +54,9 @@ async def test_create_camera_invalid_url_rejected(client):
         "location": "Nowhere",
     }
     resp = await client.post("/cameras", json=payload)
-    assert resp.status_code == 422, (
-        f"Invalid URL scheme should be rejected with 422, got {resp.status_code}"
-    )
+    assert (
+        resp.status_code == 422
+    ), f"Invalid URL scheme should be rejected with 422, got {resp.status_code}"
 
 
 @pytest.mark.asyncio
@@ -67,6 +69,7 @@ async def test_create_camera_webcam_index_accepted(client):
         "location": "Lab",
     }
     resp = await client.post("/cameras", json=payload)
-    assert resp.status_code in {200, 201}, (
-        f"Webcam index '0' should be accepted, got {resp.status_code}: {resp.text}"
-    )
+    assert resp.status_code in {
+        200,
+        201,
+    }, f"Webcam index '0' should be accepted, got {resp.status_code}: {resp.text}"

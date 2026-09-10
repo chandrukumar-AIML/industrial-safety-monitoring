@@ -17,8 +17,8 @@ Endpoints covered:
 """
 
 import random
-from locust import HttpUser, task, between
 
+from locust import HttpUser, between, task
 
 _CHAT_QUERIES = [
     "What are OSHA requirements for hard hats?",

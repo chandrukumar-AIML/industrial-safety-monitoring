@@ -9,6 +9,7 @@ Coverage:
   - Response shape
   - Status values
 """
+
 from __future__ import annotations
 
 import pytest
@@ -22,9 +23,10 @@ async def test_health_public_access(unauth_client):
     Never returns 401/403.
     """
     resp = await unauth_client.get("/health")
-    assert resp.status_code in {200, 503}, (
-        f"Health must be public (200/503), got {resp.status_code}: {resp.text}"
-    )
+    assert resp.status_code in {
+        200,
+        503,
+    }, f"Health must be public (200/503), got {resp.status_code}: {resp.text}"
 
 
 @pytest.mark.asyncio
@@ -47,9 +49,11 @@ async def test_health_status_value(client):
     """Health status must be 'ok' or 'degraded'."""
     resp = await client.get("/health")
     data = resp.json()
-    assert data["status"] in {"ok", "degraded", "starting"}, (
-        f"Unexpected status value: {data['status']}"
-    )
+    assert data["status"] in {
+        "ok",
+        "degraded",
+        "starting",
+    }, f"Unexpected status value: {data['status']}"
 
 
 @pytest.mark.asyncio
@@ -66,12 +70,14 @@ async def test_health_demo_mode_flag(client):
 async def test_health_not_blocked_by_auth(unauth_client):
     """Health must never return 401/403 — it's a public liveness probe."""
     resp = await unauth_client.get("/health")
-    assert resp.status_code not in {401, 403}, (
-        f"Health endpoint blocked by auth — should be public: {resp.status_code}"
-    )
+    assert resp.status_code not in {
+        401,
+        403,
+    }, f"Health endpoint blocked by auth — should be public: {resp.status_code}"
 
 
 # ── Liveness / readiness probes (added in production audit) ──────
+
 
 @pytest.mark.asyncio
 async def test_liveness_probe(unauth_client):
@@ -90,9 +96,9 @@ async def test_readiness_probe_checks_db(unauth_client):
     resp = await unauth_client.get("/health/ready")
     assert resp.status_code in {200, 503}, f"Unexpected: {resp.status_code}"
     data = resp.json()
-    assert "checks" in data and "database" in data["checks"], (
-        f"Readiness must report dependency checks, got: {data}"
-    )
+    assert (
+        "checks" in data and "database" in data["checks"]
+    ), f"Readiness must report dependency checks, got: {data}"
 
 
 @pytest.mark.asyncio

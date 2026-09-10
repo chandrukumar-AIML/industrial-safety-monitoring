@@ -10,11 +10,12 @@ This migration:
 2. Adds performance indexes on frequently-queried columns
 3. Sets correct column defaults (fixes previous manual ALTER scripts)
 """
+
 from __future__ import annotations
 
-from alembic import op
 import sqlalchemy as sa
-import sqlmodel
+
+from alembic import op
 
 # revision identifiers
 revision: str = "0001"
@@ -42,8 +43,12 @@ def upgrade() -> None:
         sa.Column("acknowledged_by", sa.String(64), nullable=True),
         sa.Column("camera_id", sa.String(64), nullable=True),
         sa.Column("frame_idx", sa.Integer, nullable=False, server_default="0"),
-        sa.Column("timestamp", sa.DateTime, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
-        sa.Column("created_at", sa.DateTime, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+        sa.Column(
+            "timestamp", sa.DateTime, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")
+        ),
+        sa.Column(
+            "created_at", sa.DateTime, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")
+        ),
     )
     op.create_index("ix_violation_events_timestamp", "violation_events", ["timestamp"])
     op.create_index("ix_violation_events_class_name", "violation_events", ["class_name"])
@@ -65,8 +70,12 @@ def upgrade() -> None:
         sa.Column("hr_alert_sent", sa.Boolean, nullable=False, server_default="0"),
         sa.Column("hr_alert_sent_at", sa.DateTime, nullable=True),
         sa.Column("active", sa.Boolean, nullable=False, server_default="1"),
-        sa.Column("created_at", sa.DateTime, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
-        sa.Column("updated_at", sa.DateTime, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+        sa.Column(
+            "created_at", sa.DateTime, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")
+        ),
     )
     op.create_index("ix_worker_profiles_worker_id", "worker_profiles", ["worker_id"])
     op.create_index("ix_worker_profiles_risk_score", "worker_profiles", ["risk_score"])
@@ -77,7 +86,9 @@ def upgrade() -> None:
         sa.Column("id", sa.Integer, primary_key=True, autoincrement=True),
         sa.Column("worker_id", sa.String(64), nullable=False),
         sa.Column("violation_id", sa.Integer, nullable=False),
-        sa.Column("created_at", sa.DateTime, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+        sa.Column(
+            "created_at", sa.DateTime, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")
+        ),
         sa.ForeignKeyConstraint(["violation_id"], ["violation_events.id"]),
     )
     op.create_index("ix_worker_violations_worker_id", "worker_violations", ["worker_id"])
@@ -97,7 +108,9 @@ def upgrade() -> None:
         sa.Column("reconnect_count", sa.Integer, nullable=False, server_default="0"),
         sa.Column("last_seen", sa.DateTime, nullable=True),
         sa.Column("updated_at", sa.DateTime, nullable=True),
-        sa.Column("created_at", sa.DateTime, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+        sa.Column(
+            "created_at", sa.DateTime, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")
+        ),
     )
     op.create_index("ix_camera_registry_camera_id", "camera_registry", ["camera_id"])
 
@@ -112,7 +125,9 @@ def upgrade() -> None:
         sa.Column("polygon", sa.Text, nullable=True),
         sa.Column("required_ppe", sa.Text, nullable=True),
         sa.Column("risk_multiplier", sa.Float, nullable=False, server_default="1.0"),
-        sa.Column("created_at", sa.DateTime, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+        sa.Column(
+            "created_at", sa.DateTime, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")
+        ),
     )
     op.create_index("ix_camera_zones_zone_id", "camera_zones", ["zone_id"])
 
@@ -131,7 +146,9 @@ def upgrade() -> None:
         sa.Column("compliance_delta", sa.Float, nullable=True),
         sa.Column("final_status", sa.String(32), nullable=True),
         sa.Column("trace_steps", sa.Text, nullable=True),
-        sa.Column("created_at", sa.DateTime, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+        sa.Column(
+            "created_at", sa.DateTime, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")
+        ),
     )
     op.create_index("ix_agent_runs_run_id", "agent_runs", ["run_id"])
     op.create_index("ix_agent_runs_created_at", "agent_runs", ["created_at"])
@@ -146,7 +163,9 @@ def upgrade() -> None:
         sa.Column("class_name", sa.String(64), nullable=True),
         sa.Column("zone_id", sa.String(64), nullable=True),
         sa.Column("confidence", sa.Float, nullable=True),
-        sa.Column("timestamp", sa.DateTime, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+        sa.Column(
+            "timestamp", sa.DateTime, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")
+        ),
         sa.Column("incident_summary", sa.Text, nullable=True),
         sa.Column("root_cause_analysis", sa.Text, nullable=True),
         sa.Column("corrective_actions", sa.Text, nullable=True),
@@ -161,7 +180,9 @@ def upgrade() -> None:
         sa.Column("pdf_size_bytes", sa.Integer, nullable=True),
         sa.Column("report_json", sa.Text, nullable=True),
         sa.Column("status", sa.String(32), nullable=False, server_default="generated"),
-        sa.Column("created_at", sa.DateTime, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+        sa.Column(
+            "created_at", sa.DateTime, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")
+        ),
     )
     op.create_index("ix_incident_reports_created_at", "incident_reports", ["created_at"])
     op.create_index("ix_incident_reports_zone_id", "incident_reports", ["zone_id"])
@@ -176,7 +197,9 @@ def upgrade() -> None:
         sa.Column("resource_id", sa.String(64), nullable=True),
         sa.Column("details", sa.Text, nullable=True),
         sa.Column("ip_address", sa.String(45), nullable=True),
-        sa.Column("created_at", sa.DateTime, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+        sa.Column(
+            "created_at", sa.DateTime, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")
+        ),
     )
     op.create_index("ix_audit_log_action", "audit_log", ["action"])
     op.create_index("ix_audit_log_actor", "audit_log", ["actor"])
@@ -192,7 +215,9 @@ def upgrade() -> None:
         sa.Column("events", sa.Text, nullable=True),
         sa.Column("active", sa.Boolean, nullable=False, server_default="1"),
         sa.Column("last_triggered_at", sa.DateTime, nullable=True),
-        sa.Column("created_at", sa.DateTime, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+        sa.Column(
+            "created_at", sa.DateTime, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")
+        ),
     )
 
     # ── model_deployments ─────────────────────────────────────
@@ -215,7 +240,9 @@ def upgrade() -> None:
         sa.Column("notes", sa.Text, nullable=True),
         sa.Column("deployed_at", sa.DateTime, nullable=True),
         sa.Column("retired_at", sa.DateTime, nullable=True),
-        sa.Column("created_at", sa.DateTime, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+        sa.Column(
+            "created_at", sa.DateTime, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")
+        ),
     )
     op.create_index("ix_model_deployments_stage", "model_deployments", ["stage"])
 
@@ -228,7 +255,9 @@ def upgrade() -> None:
         sa.Column("location", sa.String(256), nullable=True),
         sa.Column("timezone", sa.String(64), nullable=False, server_default="UTC"),
         sa.Column("active", sa.Boolean, nullable=False, server_default="1"),
-        sa.Column("created_at", sa.DateTime, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+        sa.Column(
+            "created_at", sa.DateTime, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")
+        ),
     )
     op.create_index("ix_sites_site_id", "sites", ["site_id"])
 
@@ -242,7 +271,9 @@ def upgrade() -> None:
         sa.Column("end_time", sa.String(8), nullable=False),
         sa.Column("days", sa.Text, nullable=True),
         sa.Column("active", sa.Boolean, nullable=False, server_default="1"),
-        sa.Column("created_at", sa.DateTime, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+        sa.Column(
+            "created_at", sa.DateTime, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")
+        ),
     )
     op.create_index("ix_shifts_site_id", "shifts", ["site_id"])
 
@@ -258,7 +289,9 @@ def upgrade() -> None:
         sa.Column("landmark_data", sa.Text, nullable=True),
         sa.Column("combined_alert", sa.Boolean, nullable=False, server_default="0"),
         sa.Column("frame_idx", sa.Integer, nullable=False, server_default="0"),
-        sa.Column("timestamp", sa.DateTime, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+        sa.Column(
+            "timestamp", sa.DateTime, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")
+        ),
     )
     op.create_index("ix_pose_hazard_events_timestamp", "pose_hazard_events", ["timestamp"])
     op.create_index("ix_pose_hazard_events_track_id", "pose_hazard_events", ["track_id"])
@@ -276,7 +309,9 @@ def upgrade() -> None:
         sa.Column("zone_id", sa.String(64), nullable=True),
         sa.Column("camera_id", sa.String(64), nullable=True),
         sa.Column("frame_idx", sa.Integer, nullable=False, server_default="0"),
-        sa.Column("timestamp", sa.DateTime, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+        sa.Column(
+            "timestamp", sa.DateTime, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")
+        ),
     )
     op.create_index("ix_proximity_alerts_timestamp", "proximity_alerts", ["timestamp"])
 
@@ -294,7 +329,9 @@ def upgrade() -> None:
         sa.Column("bbox_y2", sa.Float, nullable=True),
         sa.Column("frame_idx", sa.Integer, nullable=False, server_default="0"),
         sa.Column("alert_sent", sa.Boolean, nullable=False, server_default="0"),
-        sa.Column("timestamp", sa.DateTime, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+        sa.Column(
+            "timestamp", sa.DateTime, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")
+        ),
     )
     op.create_index("ix_fire_hazard_events_timestamp", "fire_hazard_events", ["timestamp"])
 
@@ -303,11 +340,15 @@ def upgrade() -> None:
         "weekly_reports",
         sa.Column("id", sa.Integer, primary_key=True, autoincrement=True),
         sa.Column("site_id", sa.String(64), nullable=True),
-        sa.Column("report_date", sa.DateTime, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+        sa.Column(
+            "report_date", sa.DateTime, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")
+        ),
         sa.Column("site_score", sa.Float, nullable=True),
         sa.Column("total_violations", sa.Integer, nullable=False, server_default="0"),
         sa.Column("pdf_path", sa.String(256), nullable=True),
-        sa.Column("created_at", sa.DateTime, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+        sa.Column(
+            "created_at", sa.DateTime, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")
+        ),
     )
 
     # ── api_keys ──────────────────────────────────────────────
@@ -321,7 +362,9 @@ def upgrade() -> None:
         sa.Column("active", sa.Boolean, nullable=False, server_default="1"),
         sa.Column("last_used_at", sa.DateTime, nullable=True),
         sa.Column("expires_at", sa.DateTime, nullable=True),
-        sa.Column("created_at", sa.DateTime, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+        sa.Column(
+            "created_at", sa.DateTime, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")
+        ),
     )
     op.create_index("ix_api_keys_key_id", "api_keys", ["key_id"])
 
@@ -329,11 +372,23 @@ def upgrade() -> None:
 def downgrade() -> None:
     """Drop all tables in reverse creation order."""
     tables = [
-        "api_keys", "weekly_reports", "fire_hazard_events",
-        "proximity_alerts", "pose_hazard_events", "shifts", "sites",
-        "model_deployments", "webhooks", "audit_log", "incident_reports",
-        "agent_runs", "camera_zones", "camera_registry",
-        "worker_violations", "worker_profiles", "violation_events",
+        "api_keys",
+        "weekly_reports",
+        "fire_hazard_events",
+        "proximity_alerts",
+        "pose_hazard_events",
+        "shifts",
+        "sites",
+        "model_deployments",
+        "webhooks",
+        "audit_log",
+        "incident_reports",
+        "agent_runs",
+        "camera_zones",
+        "camera_registry",
+        "worker_violations",
+        "worker_profiles",
+        "violation_events",
     ]
     for table in tables:
         op.drop_table(table)

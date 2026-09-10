@@ -9,6 +9,7 @@ Coverage:
   - POST /zones → create zone with zone_type
   - zone_type NULL regression guard
 """
+
 from __future__ import annotations
 
 import pytest
@@ -18,9 +19,9 @@ import pytest
 async def test_list_zones_returns_list(client):
     """GET /zones must return a JSON list, never 500."""
     resp = await client.get("/zones")
-    assert resp.status_code == 200, (
-        f"GET /zones returned {resp.status_code} — possible NULL zone_type regression"
-    )
+    assert (
+        resp.status_code == 200
+    ), f"GET /zones returned {resp.status_code} — possible NULL zone_type regression"
     assert isinstance(resp.json(), list)
 
 
@@ -33,8 +34,12 @@ async def test_create_zone(client):
         "zone_type": "restricted",
         "required_ppe": ["helmet", "vest"],
         "camera_id": "cam-test-001",
-        "polygon_norm": [{"x": 0.0, "y": 0.0}, {"x": 1.0, "y": 0.0},
-                         {"x": 1.0, "y": 1.0}, {"x": 0.0, "y": 1.0}],
+        "polygon_norm": [
+            {"x": 0.0, "y": 0.0},
+            {"x": 1.0, "y": 0.0},
+            {"x": 1.0, "y": 1.0},
+            {"x": 0.0, "y": 1.0},
+        ],
     }
     resp = await client.post("/zones", json=payload)
     assert resp.status_code in {200, 201}, f"Create zone failed: {resp.text}"
@@ -48,6 +53,6 @@ async def test_zone_type_never_null(client):
     resp = await client.get("/zones")
     assert resp.status_code == 200
     for zone in resp.json():
-        assert zone.get("zone_type") is not None, (
-            f"Zone {zone.get('zone_id')} has NULL zone_type — regression!"
-        )
+        assert (
+            zone.get("zone_type") is not None
+        ), f"Zone {zone.get('zone_id')} has NULL zone_type — regression!"

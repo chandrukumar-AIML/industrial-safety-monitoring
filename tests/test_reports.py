@@ -9,6 +9,7 @@ Coverage:
   - GET /reports/stats/summary → stats shape
   - session.execute() regression (was session.exec())
 """
+
 from __future__ import annotations
 
 import pytest
