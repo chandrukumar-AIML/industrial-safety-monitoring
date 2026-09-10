@@ -73,7 +73,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 COPY --from=builder --chown=appuser:appgroup /opt/venv /opt/venv
 
 # Copy application source with proper ownership
-COPY --chown=appuser:appgroup inference/ ./inference/
+COPY --chown=appuser:appgroup backend/inference/ ./inference/
 COPY --chown=appuser:appgroup backend/   ./backend/
 COPY --chown=appuser:appgroup requirements.txt ./
 
